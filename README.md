@@ -11,6 +11,21 @@ Qt6 desktop analyzer for CAN and R-Net traffic with live tables, R-Net decoding,
 - simulator mode for development without hardware
 - optional proprietary ControlCAN integration
 
+## Screenshots
+
+### Live Table
+Real-time CAN frame capture with timestamp, ID, DLC and raw payload view.
+Optimized for high bus load and continuous monitoring.
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-50-01.png" width="700">
+
+### R-Net Decoder Table
+Decoded R-Net frames with type grouping, counters and parameter extraction.
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-58-44.png" width="700">
+
+### R-Net Signal-Plot Table
+Live visualization of tagged R-Net messages.
+Displays payload evolution over time with full history support.
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-57-49.png" width="700">
 ## Build
 
 ### Simulator-only build
@@ -20,7 +35,7 @@ mkdir -p build
 cd build
 cmake ..
 cmake --build .
-./QtRNetAnalyzer
+./QtRNetAnalyzer --input <candump.txt>
 ```
 
 ### Build with proprietary ControlCAN SDK
