@@ -1,35 +1,48 @@
-# RNet Qt6 Analyzer
+# QtRNetAnalyzer
 
-Eine vollständige Qt6-Widgets-Beispielanwendung für R-Net/CAN-Frames.
+Qt6 desktop analyzer for CAN and R-Net traffic with live tables, R-Net decoding, tagging, and live signal plotting.
 
-## Enthalten
+## Features
 
-- `CanFrame` Grundtyp
-- `RNetFrame`-Hierarchie
-- `RNetFrameModel` mit Dekodierung, Aggregation und Tabellenanzeige
-- Live-Simulator für Beispiel-Frames
-- Qt6/CMake-Projektstruktur
+- Live CAN table with sorting
+- Decoded R-Net table with aggregation by type key
+- Taggable R-Net messages
+- Live plot window for tagged frames including accumulated history
+- Simulator mode for development without hardware
+- Optional proprietary ControlCAN integration
+
+## Screenshots
+
+### Live Table
+Real-time CAN frame capture with timestamp, ID, DLC and raw payload view.  
+Optimized for high bus load and continuous monitoring.
+
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-50-01.png" width="900">
+
+---
+
+### R-Net Decoder Table
+Decoded R-Net frames with type grouping, counters and parameter extraction.
+
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-58-44.png" width="900">
+
+---
+
+### R-Net Signal Plot
+Interactive live visualization of tagged R-Net messages.  
+Tracks payload evolution over time with full history support.
+
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-57-49.png" width="900">
+
+---
 
 ## Build
+
+### Simulator-only build
 
 ```bash
 mkdir -p build
 cd build
 cmake ..
 cmake --build .
-./RNetQt6Analyzer
-```
-
-## Architektur
-
-- Neue `CanFrame`s werden per `appendCanFrame()` dekodiert.
-- Bereits bekannte Nachrichten werden über `m_rowByKey` zusammengefasst.
-- Neue dekodierte `RNetFrame`s werden ans Ende von `m_rows` angehängt.
-
-## Hinweis
-
-Der mitgelieferte `rnetframe.h` aus der Unterhaltung wurde als fachliche Basis übernommen, aber für ein kompilierbares Qt6-Projekt bereinigt und vervollständigt.
-
-## Integration echter Hardware
-
-Für reale CAN-Hardware kann der Simulator durch eine eigene `RNetSource`-Implementierung ersetzt werden, die `frameReceived(const CanFrame&)` emittiert.
+./QtRNetAnalyzer --input <candump.txt>
