@@ -10,6 +10,7 @@
 struct SignalHistory
 {
     quint64 sourceKey = 0;
+    QString sourceName;
     QString name;
     QString unit;
     QVector<SignalSample> samples;
@@ -42,9 +43,11 @@ private:
     static double frameTimeSec(const CanFrame &frame);
     static quint64 makeSignalKey(quint64 sourceKey, quint8 parameterIndex);
     void recomputeTimeRange();
+    static constexpr int kMaxSamplesPerSignal = 20000;
 
 private:
     QHash<quint64, SignalHistory> m_signals;
+    QHash<quint64, QString> m_sourceNames;
     double m_minTime = 0.0;
     double m_maxTime = 0.0;
     bool m_hasTime = false;

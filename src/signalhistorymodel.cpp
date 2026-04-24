@@ -16,6 +16,7 @@ constexpr quint32 kEnableMotorOutputBase = 0x0C180000u;
 void SignalHistoryModel::clear()
 {
     m_signals.clear();
+    m_sourceNames.clear();
     m_minTime = 0.0;
     m_maxTime = 0.0;
     m_hasTime = false;
@@ -26,11 +27,14 @@ void SignalHistoryModel::addSample(const SignalSample &sample)
     auto &history = m_signals[sample.key];
     if (history.name.isEmpty()) {
         history.sourceKey = sample.sourceKey;
+        history.sourceName = m_sourceNames.value(sample.sourceKey);
         history.name = sample.name;
         history.unit = sample.unit;
     }
 
     history.samples.push_back(sample);
+    if (history.samples.size() > kMaxSamplesPerSignal)
+        history.samples.erase(history.samples.begin(), history.samples.begin() + (history.samples.size() - kMaxSamplesPerSignal));
 
     if (!m_hasTime) {
         m_minTime = sample.timeSec;
@@ -52,6 +56,7 @@ void SignalHistoryModel::addSamplesFromFrame(quint64 sourceKey, const QString &s
     const quint32 id = frame.id;
     const QByteArray &d = frame.data;
     const QString prefix = sourceName.isEmpty() ? QStringLiteral("R-Net") : sourceName;
+    m_sourceNames.insert(sourceKey, prefix);
 
     // Joystick position: 02000M00#XxYy, signed 8-bit, periodic ~10 ms.
     if (frame.extended && ((id & 0x2FFF0FFFu) == 0x02000000u || id == kJoystickId) && d.size() >= 2) {

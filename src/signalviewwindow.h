@@ -6,9 +6,9 @@
 #include <QWidget>
 
 class QLabel;
-class QListWidget;
-class QListWidgetItem;
 class QPushButton;
+class QTreeWidget;
+class QTreeWidgetItem;
 
 class SignalViewWindow final : public QWidget
 {
@@ -28,19 +28,21 @@ public slots:
     void refreshSignals();
 
 private slots:
-    void onSignalItemChanged(QListWidgetItem *item);
+    void onSignalItemChanged(QTreeWidgetItem *item, int column);
     void onPauseChanged(bool paused);
 
 private:
-    void rebuildSignalList();
-    static quint64 itemKey(const QListWidgetItem *item);
+    void rebuildSignalTree();
+    static quint64 itemKey(const QTreeWidgetItem *item);
+    static bool isSignalItem(const QTreeWidgetItem *item);
+    static bool isSourceItem(const QTreeWidgetItem *item);
 
 private:
     SignalHistoryModel m_history;
     SignalPlotWidget *m_plot = nullptr;
-    QListWidget *m_signalList = nullptr;
+    QTreeWidget *m_signalTree = nullptr;
     QLabel *m_status = nullptr;
     QPushButton *m_resetZoom = nullptr;
 
-    bool m_updatingList = false;
+    bool m_updatingTree = false;
 };

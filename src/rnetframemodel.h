@@ -2,6 +2,7 @@
 
 #include <QAbstractTableModel>
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QHash>
 #include <QSet>
 #include <QString>
@@ -59,11 +60,16 @@ class RNetFrameModel final : public QAbstractTableModel
     struct RowBucket
     {
         quint64 key = 0;
+        quint64 totalCount = 0;
         std::vector<std::unique_ptr<RNetFrame>> history;
+        QElapsedTimer updateThrottle;
+        bool throttleStarted = false;
     };
 
   private:
     static QString formatPayload(const QByteArray &data);
+    static constexpr std::size_t kMaxHistoryPerRow = 2000;
+    static constexpr qint64 kUiUpdateIntervalMs = 80;
 
   private:
     std::vector<RowBucket> m_rows;

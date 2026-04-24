@@ -2,7 +2,7 @@
 
 #include <QStyledItemDelegate>
 
-class RNetFrameDelegate final : public QStyledItemDelegate
+class RNetFrameDelegate : public QStyledItemDelegate
 {
     Q_OBJECT
   public:
@@ -14,4 +14,9 @@ class RNetFrameDelegate final : public QStyledItemDelegate
 
     QSize sizeHint(const QStyleOptionViewItem &option,
                    const QModelIndex &index) const override;
+
+    bool editorEvent(QEvent *event,
+                     QAbstractItemModel *model,
+                     const QStyleOptionViewItem &option,
+                     const QModelIndex &index) override;
 };

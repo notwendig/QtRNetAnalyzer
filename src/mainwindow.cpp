@@ -75,11 +75,11 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
 
     m_liveProxy = new QSortFilterProxyModel(this);
     m_liveProxy->setSourceModel(m_liveModel);
-    m_liveProxy->setDynamicSortFilter(true);
+    m_liveProxy->setDynamicSortFilter(false);
 
     m_rnetProxy = new QSortFilterProxyModel(this);
     m_rnetProxy->setSourceModel(m_rnetModel);
-    m_rnetProxy->setDynamicSortFilter(true);
+    m_rnetProxy->setDynamicSortFilter(false);
 
     m_liveView->setModel(m_liveProxy);
     m_liveView->setItemDelegate(new LiveFrameDelegate(m_liveView));

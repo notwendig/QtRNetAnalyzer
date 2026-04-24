@@ -110,7 +110,7 @@ QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
         return QString::number(frame->hwTimestamp, 'f', 6);
 
     case ColCount:
-        return static_cast<int>(bucket.history.size());
+        return static_cast<qulonglong>(bucket.totalCount);
 
     case ColText:
         return frame->toString();
@@ -123,8 +123,10 @@ QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
 Qt::ItemFlags RNetFrameModel::flags(const QModelIndex &index) const
 {
     Qt::ItemFlags f = QAbstractTableModel::flags(index);
-    if (index.isValid() && index.column() == ColTag)
-        f |= Qt::ItemIsUserCheckable | Qt::ItemIsEditable;
+    if (index.isValid() && index.column() == ColTag) {
+        f |= Qt::ItemIsUserCheckable;
+        f &= ~Qt::ItemIsEditable;
+    }
     return f;
 }
 
@@ -177,6 +179,9 @@ void RNetFrameModel::addFrame(const CanFrame &frame)
 
         RowBucket bucket;
         bucket.key = key;
+        bucket.totalCount = 1;
+        bucket.updateThrottle.start();
+        bucket.throttleStarted = true;
         bucket.history.push_back(std::move(decoded));
 
         m_rows.push_back(std::move(bucket));
@@ -191,11 +196,22 @@ void RNetFrameModel::addFrame(const CanFrame &frame)
             return;
 
         RowBucket &bucket = m_rows[static_cast<std::size_t>(row)];
+        ++bucket.totalCount;
         bucket.history.push_back(std::move(decoded));
+        if (bucket.history.size() > kMaxHistoryPerRow)
+            bucket.history.erase(bucket.history.begin(), bucket.history.begin() + (bucket.history.size() - kMaxHistoryPerRow));
 
-        emit dataChanged(index(row, 0),
-                         index(row, ColumnCount - 1),
-                         {Qt::DisplayRole, Qt::CheckStateRole});
+        if (!bucket.throttleStarted) {
+            bucket.updateThrottle.start();
+            bucket.throttleStarted = true;
+        }
+
+        if (bucket.updateThrottle.elapsed() >= kUiUpdateIntervalMs) {
+            emit dataChanged(index(row, ColData),
+                             index(row, ColText),
+                             {Qt::DisplayRole});
+            bucket.updateThrottle.restart();
+        }
     }
 
     if (m_taggedKeys.contains(key))

@@ -2,6 +2,7 @@
 
 #include "signalhistorymodel.h"
 
+#include <QColor>
 #include <QPoint>
 #include <QWidget>
 
@@ -15,6 +16,7 @@ public:
     void setModel(SignalHistoryModel *model);
     void setPaused(bool paused);
     bool isPaused() const { return m_paused; }
+    static QColor colorForSignalKey(quint64 key);
 
 public slots:
     void resetZoom();

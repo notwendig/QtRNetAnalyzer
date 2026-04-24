@@ -1,6 +1,9 @@
 #include "rnetframedelegate.h"
 
+#include <QAbstractItemModel>
 #include <QApplication>
+#include <QEvent>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QStyle>
 #include <QStyleOptionButton>
@@ -24,14 +27,10 @@ void RNetFrameDelegate::paint(QPainter *painter,
     const QVariant checkState = index.data(Qt::CheckStateRole);
     if (checkState.isValid())
     {
-        // Draw the normal item background first.
         style->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter, widget);
 
-        // Then draw a real Qt checkbox indicator centered in the cell.
         QStyleOptionButton cb;
         cb.state = QStyle::State_Enabled;
-        if (opt.state & QStyle::State_Selected)
-            cb.state |= QStyle::State_Selected;
         cb.state |= (checkState.toInt() == Qt::Checked)
                         ? QStyle::State_On
                         : QStyle::State_Off;
@@ -73,6 +72,29 @@ void RNetFrameDelegate::paint(QPainter *painter,
 
     painter->drawText(textRect, alignment, text);
     painter->restore();
+}
+
+bool RNetFrameDelegate::editorEvent(QEvent *event,
+                                    QAbstractItemModel *model,
+                                    const QStyleOptionViewItem &option,
+                                    const QModelIndex &index)
+{
+    Q_UNUSED(option)
+
+    if (!model || !index.isValid() || !index.data(Qt::CheckStateRole).isValid())
+        return QStyledItemDelegate::editorEvent(event, model, option, index);
+
+    if (event->type() == QEvent::MouseButtonRelease) {
+        auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        if (mouseEvent->button() != Qt::LeftButton)
+            return false;
+    } else if (event->type() != QEvent::KeyPress) {
+        return false;
+    }
+
+    const Qt::CheckState oldState = static_cast<Qt::CheckState>(index.data(Qt::CheckStateRole).toInt());
+    const Qt::CheckState newState = oldState == Qt::Checked ? Qt::Unchecked : Qt::Checked;
+    return model->setData(index, newState, Qt::CheckStateRole);
 }
 
 QSize RNetFrameDelegate::sizeHint(const QStyleOptionViewItem &option,

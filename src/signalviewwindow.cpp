@@ -1,17 +1,22 @@
 #include "signalviewwindow.h"
 
+#include <QBrush>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QList>
-#include <QListWidget>
-#include <QListWidgetItem>
+#include <QMap>
 #include <QPushButton>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
 #include <QVariant>
 #include <QVBoxLayout>
 #include <algorithm>
 
 namespace {
-constexpr int kSignalKeyRole = Qt::UserRole + 1;
+constexpr int kItemKindRole = Qt::UserRole + 1;
+constexpr int kSignalKeyRole = Qt::UserRole + 2;
+constexpr int kSourceKeyRole = Qt::UserRole + 3;
+constexpr int kKindSource = 1;
+constexpr int kKindSignal = 2;
 }
 
 SignalViewWindow::SignalViewWindow(QWidget *parent)
@@ -20,18 +25,22 @@ SignalViewWindow::SignalViewWindow(QWidget *parent)
     auto *root = new QHBoxLayout(this);
 
     auto *side = new QVBoxLayout;
-    auto *title = new QLabel(QStringLiteral("Signals from checked R-Net rows"), this);
+    auto *title = new QLabel(QStringLiteral("Checked R-Net frames"), this);
     title->setStyleSheet(QStringLiteral("font-weight: bold;"));
 
-    m_signalList = new QListWidget(this);
-    m_signalList->setMinimumWidth(260);
+    m_signalTree = new QTreeWidget(this);
+    m_signalTree->setMinimumWidth(340);
+    m_signalTree->setColumnCount(3);
+    m_signalTree->setHeaderLabels({QStringLiteral("Signal"), QStringLiteral("Color"), QStringLiteral("Unit")});
+    m_signalTree->setRootIsDecorated(true);
+    m_signalTree->setAlternatingRowColors(true);
 
     m_resetZoom = new QPushButton(QStringLiteral("Reset Zoom"), this);
-    m_status = new QLabel(QStringLiteral("Check R-Net rows to feed this view. Click plot to pause/live. Ctrl+drag to zoom."), this);
+    m_status = new QLabel(QStringLiteral("Check rows in the R-Net table. Each checked R-Net frame appears here with its signal channels."), this);
     m_status->setWordWrap(true);
 
     side->addWidget(title);
-    side->addWidget(m_signalList, 1);
+    side->addWidget(m_signalTree, 1);
     side->addWidget(m_resetZoom);
     side->addWidget(m_status);
 
@@ -41,7 +50,7 @@ SignalViewWindow::SignalViewWindow(QWidget *parent)
     root->addLayout(side);
     root->addWidget(m_plot, 1);
 
-    connect(m_signalList, &QListWidget::itemChanged, this, &SignalViewWindow::onSignalItemChanged);
+    connect(m_signalTree, &QTreeWidget::itemChanged, this, &SignalViewWindow::onSignalItemChanged);
     connect(m_resetZoom, &QPushButton::clicked, m_plot, &SignalPlotWidget::resetZoom);
     connect(m_plot, &SignalPlotWidget::pauseChanged, this, &SignalViewWindow::onPauseChanged);
 }
@@ -53,7 +62,7 @@ void SignalViewWindow::addFrame(quint64 sourceKey, const QString &sourceName, co
     const int after = m_history.allSignals().size();
 
     if (after != before)
-        rebuildSignalList();
+        rebuildSignalTree();
 
     m_plot->refreshView();
 }
@@ -61,14 +70,14 @@ void SignalViewWindow::addFrame(quint64 sourceKey, const QString &sourceName, co
 void SignalViewWindow::removeSource(quint64 sourceKey)
 {
     m_history.removeSource(sourceKey);
-    rebuildSignalList();
+    rebuildSignalTree();
     m_plot->refreshView();
 }
 
 void SignalViewWindow::clear()
 {
     m_history.clear();
-    m_signalList->clear();
+    m_signalTree->clear();
     m_plot->resetZoom();
     m_plot->refreshView();
     m_status->setText(QStringLiteral("Signal history cleared."));
@@ -76,48 +85,110 @@ void SignalViewWindow::clear()
 
 void SignalViewWindow::refreshSignals()
 {
-    rebuildSignalList();
+    rebuildSignalTree();
     m_plot->refreshView();
 }
 
-void SignalViewWindow::onSignalItemChanged(QListWidgetItem *item)
+void SignalViewWindow::onSignalItemChanged(QTreeWidgetItem *item, int column)
 {
-    if (m_updatingList || !item)
+    Q_UNUSED(column)
+
+    if (m_updatingTree || !item)
         return;
 
-    const quint64 key = itemKey(item);
-    m_history.setSignalEnabled(key, item->checkState() == Qt::Checked);
+    m_updatingTree = true;
+
+    if (isSourceItem(item)) {
+        const bool enabled = item->checkState(0) == Qt::Checked;
+        for (int i = 0; i < item->childCount(); ++i) {
+            QTreeWidgetItem *child = item->child(i);
+            child->setCheckState(0, enabled ? Qt::Checked : Qt::Unchecked);
+            m_history.setSignalEnabled(itemKey(child), enabled);
+        }
+    } else if (isSignalItem(item)) {
+        m_history.setSignalEnabled(itemKey(item), item->checkState(0) == Qt::Checked);
+
+        QTreeWidgetItem *parent = item->parent();
+        if (parent) {
+            int checked = 0;
+            for (int i = 0; i < parent->childCount(); ++i)
+                checked += parent->child(i)->checkState(0) == Qt::Checked ? 1 : 0;
+            parent->setCheckState(0, checked == 0 ? Qt::Unchecked : (checked == parent->childCount() ? Qt::Checked : Qt::PartiallyChecked));
+        }
+    }
+
+    m_updatingTree = false;
     m_plot->refreshView();
 }
 
 void SignalViewWindow::onPauseChanged(bool paused)
 {
     m_status->setText(paused
-                          ? QStringLiteral("Paused. Ctrl+drag a marked area to zoom, right click resets zoom.")
-                          : QStringLiteral("Live mode. The view follows newest data from checked R-Net rows."));
+                          ? QStringLiteral("Paused. Ctrl+drag inside the plot to zoom, right click resets zoom.")
+                          : QStringLiteral("Live mode. Only checked signal channels from checked R-Net rows are plotted."));
 }
 
-void SignalViewWindow::rebuildSignalList()
+void SignalViewWindow::rebuildSignalTree()
 {
-    m_updatingList = true;
-    m_signalList->clear();
+    m_updatingTree = true;
+    m_signalTree->clear();
 
-    QList<quint64> keys = m_history.allSignals().keys();
-    std::sort(keys.begin(), keys.end());
+    QMap<quint64, QList<quint64>> groups;
+    QHash<quint64, QString> sourceNames;
 
-    for (const quint64 key : keys) {
-        const SignalHistory &history = m_history.allSignals().value(key);
-        const QString unit = history.unit.isEmpty() ? QString() : QStringLiteral(" [%1]").arg(history.unit);
-        auto *item = new QListWidgetItem(history.name + unit, m_signalList);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(history.enabled ? Qt::Checked : Qt::Unchecked);
-        item->setData(kSignalKeyRole, QVariant::fromValue<qulonglong>(key));
+    for (auto it = m_history.allSignals().constBegin(); it != m_history.allSignals().constEnd(); ++it) {
+        groups[it.value().sourceKey].append(it.key());
+        sourceNames.insert(it.value().sourceKey,
+                           it.value().sourceName.isEmpty() ? QStringLiteral("R-Net") : it.value().sourceName);
     }
 
-    m_updatingList = false;
+    for (auto groupIt = groups.constBegin(); groupIt != groups.constEnd(); ++groupIt) {
+        const quint64 sourceKey = groupIt.key();
+        auto *sourceItem = new QTreeWidgetItem(m_signalTree);
+        sourceItem->setText(0, sourceNames.value(sourceKey));
+        sourceItem->setData(0, kItemKindRole, kKindSource);
+        sourceItem->setData(0, kSourceKeyRole, QVariant::fromValue<qulonglong>(sourceKey));
+        sourceItem->setFlags(sourceItem->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsAutoTristate);
+        sourceItem->setExpanded(true);
+
+        int enabledChildren = 0;
+        QList<quint64> signalKeys = groupIt.value();
+        std::sort(signalKeys.begin(), signalKeys.end());
+
+        for (const quint64 signalKey : signalKeys) {
+            const SignalHistory &history = m_history.allSignals().value(signalKey);
+            auto *signalItem = new QTreeWidgetItem(sourceItem);
+            signalItem->setText(0, history.name);
+            signalItem->setText(1, QStringLiteral("■"));
+            signalItem->setForeground(1, QBrush(SignalPlotWidget::colorForSignalKey(signalKey)));
+            signalItem->setText(2, history.unit);
+            signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
+            signalItem->setCheckState(0, history.enabled ? Qt::Checked : Qt::Unchecked);
+            signalItem->setData(0, kItemKindRole, kKindSignal);
+            signalItem->setData(0, kSignalKeyRole, QVariant::fromValue<qulonglong>(signalKey));
+            if (history.enabled)
+                ++enabledChildren;
+        }
+
+        sourceItem->setCheckState(0, enabledChildren == 0 ? Qt::Unchecked : (enabledChildren == signalKeys.size() ? Qt::Checked : Qt::PartiallyChecked));
+    }
+
+    m_signalTree->resizeColumnToContents(0);
+    m_signalTree->resizeColumnToContents(1);
+    m_updatingTree = false;
 }
 
-quint64 SignalViewWindow::itemKey(const QListWidgetItem *item)
+quint64 SignalViewWindow::itemKey(const QTreeWidgetItem *item)
 {
-    return item ? item->data(kSignalKeyRole).toULongLong() : 0;
+    return item ? item->data(0, kSignalKeyRole).toULongLong() : 0;
+}
+
+bool SignalViewWindow::isSignalItem(const QTreeWidgetItem *item)
+{
+    return item && item->data(0, kItemKindRole).toInt() == kKindSignal;
+}
+
+bool SignalViewWindow::isSourceItem(const QTreeWidgetItem *item)
+{
+    return item && item->data(0, kItemKindRole).toInt() == kKindSource;
 }

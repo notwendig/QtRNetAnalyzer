@@ -9,6 +9,12 @@
 #include <QtMath>
 #include <limits>
 
+QColor SignalPlotWidget::colorForSignalKey(quint64 key)
+{
+    const int hue = int((key * 97u) % 360u);
+    return QColor::fromHsv(hue, 190, 235);
+}
+
 SignalPlotWidget::SignalPlotWidget(QWidget *parent)
     : QWidget(parent)
 {
@@ -264,7 +270,7 @@ void SignalPlotWidget::drawSignals(QPainter &painter, const QRect &plot) const
         if (!history.enabled || history.samples.isEmpty())
             continue;
 
-        const QColor color = QColor::fromHsv((colorIndex * 67) % 360, 190, 235);
+        const QColor color = colorForSignalKey(it.key());
         painter.setPen(QPen(color, 1.7));
 
         QPainterPath path;
