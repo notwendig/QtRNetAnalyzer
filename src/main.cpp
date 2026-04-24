@@ -1,11 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-only
-/*
- * QtRNetAnalyzer
- *
- * Copyright (c) 2026
- * ChatGPT (GPT-5.4 Thinking)
- * Jürgen Willi Sievers <JSievers@NadiSoft.de>
- */
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -16,11 +8,11 @@ int main(int argc, char *argv[]) {
 
     QApplication app(argc, argv);
 
-    QCoreApplication::setApplicationName(QStringLiteral("QtRNetAnalyzer"));
+    QCoreApplication::setApplicationName(QStringLiteral("Qt6 ControlCAN Analyzer Pro"));
     QCoreApplication::setApplicationVersion(QStringLiteral("1.0"));
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("QtRNetAnalyzer with live CAN and candump replay"));
+    parser.setApplicationDescription(QStringLiteral("Qt6 ControlCAN Analyzer Pro with live CAN and candump replay"));
     parser.addHelpOption();
     parser.addVersionOption();
 

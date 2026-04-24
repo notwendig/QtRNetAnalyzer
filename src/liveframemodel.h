@@ -1,11 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-only
-/*
- * QtRNetAnalyzer
- *
- * Copyright (c) 2026
- * ChatGPT (GPT-5.4 Thinking)
- * Jürgen Willi Sievers <JSievers@NadiSoft.de>
- */
 #pragma once
 
 #include <QAbstractTableModel>
@@ -34,11 +26,6 @@ class LiveFrameModel final : public QAbstractTableModel
     };
 
     explicit LiveFrameModel(QObject *parent = nullptr);
-
-    enum Roles
-    {
-        SortRole = Qt::UserRole
-    };
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     int columnCount(const QModelIndex &parent = QModelIndex()) const override;

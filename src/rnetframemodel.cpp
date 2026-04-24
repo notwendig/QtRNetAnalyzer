@@ -1,15 +1,6 @@
-// SPDX-License-Identifier: GPL-3.0-only
-/*
- * QtRNetAnalyzer
- *
- * Copyright (c) 2026
- * ChatGPT (GPT-5.4 Thinking)
- * Jürgen Willi Sievers <JSievers@NadiSoft.de>
- */
 #include "rnetframemodel.h"
 
 #include <QString>
-#include <QBrush>
 
 RNetFrameModel::RNetFrameModel(QObject *parent)
     : QAbstractTableModel(parent)
@@ -39,7 +30,7 @@ QVariant RNetFrameModel::headerData(int section, Qt::Orientation orientation, in
 
     switch (section)
     {
-    case ColTag:       return QStringLiteral("Tag");
+    case ColTag:       return QStringLiteral("Plot");
     case ColIndex:     return QStringLiteral("#");
     case ColId:        return QStringLiteral("ID");
     case ColName:      return QStringLiteral("Name");
@@ -51,37 +42,6 @@ QVariant RNetFrameModel::headerData(int section, Qt::Orientation orientation, in
     case ColText:      return QStringLiteral("Text");
     default:           return {};
     }
-}
-
-
-Qt::ItemFlags RNetFrameModel::flags(const QModelIndex &index) const
-{
-    if (!index.isValid())
-        return Qt::NoItemFlags;
-
-    Qt::ItemFlags f = QAbstractTableModel::flags(index);
-    if (index.column() == ColTag)
-        f |= Qt::ItemIsEditable | Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable;
-    return f;
-}
-
-bool RNetFrameModel::setData(const QModelIndex &index, const QVariant &value, int role)
-{
-    if (!index.isValid() || index.column() != ColTag || role != Qt::CheckStateRole)
-        return false;
-    if (index.row() < 0 || index.row() >= static_cast<int>(m_rows.size()))
-        return false;
-
-    RowBucket &bucket = m_rows[static_cast<std::size_t>(index.row())];
-    const bool tagged = value.toInt() == Qt::Checked;
-    if (bucket.tagged == tagged)
-        return false;
-
-    bucket.tagged = tagged;
-    emit dataChanged(index, index, {Qt::DisplayRole, Qt::CheckStateRole});
-    const RNetFrame *frame = bucket.history.empty() ? nullptr : bucket.history.back().get();
-    emit tagStateChanged(bucket.key, frame ? frame->name() : QStringLiteral("RNet"), bucket.tagged);
-    return true;
 }
 
 QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
@@ -101,14 +61,12 @@ QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
         return {};
 
     if (role == Qt::CheckStateRole && index.column() == ColTag)
-        return bucket.tagged ? Qt::Checked : Qt::Unchecked;
-
-    if (role == Qt::BackgroundRole && index.column() == ColTag && bucket.tagged)
-        return QBrush(QColor("#ede7f6"));
+        return m_taggedKeys.contains(bucket.key) ? Qt::Checked : Qt::Unchecked;
 
     if (role == Qt::TextAlignmentRole)
     {
-        if (index.column() == ColIndex ||
+        if (index.column() == ColTag ||
+            index.column() == ColIndex ||
             index.column() == ColExt ||
             index.column() == ColRtr ||
             index.column() == ColTimestamp ||
@@ -118,45 +76,6 @@ QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
         }
 
         return QVariant::fromValue(int(Qt::AlignLeft | Qt::AlignVCenter));
-    }
-
-    if (role == SortRole)
-    {
-        switch (index.column())
-        {
-        case ColTag:
-            return bucket.tagged ? 1 : 0;
-
-        case ColIndex:
-            return index.row();
-
-        case ColId:
-            return QVariant::fromValue<qulonglong>(frame->id);
-
-        case ColName:
-            return frame->name();
-
-        case ColData:
-            return formatPayload(frame->data);
-
-        case ColExt:
-            return frame->extended ? 1 : 0;
-
-        case ColRtr:
-            return frame->remote ? 1 : 0;
-
-        case ColTimestamp:
-            return QVariant::fromValue<qulonglong>(frame->hwTimestamp);
-
-        case ColCount:
-            return static_cast<int>(bucket.history.size());
-
-        case ColText:
-            return frame->toString();
-
-        default:
-            return {};
-        }
     }
 
     if (role != Qt::DisplayRole)
@@ -201,18 +120,42 @@ QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
     }
 }
 
+Qt::ItemFlags RNetFrameModel::flags(const QModelIndex &index) const
+{
+    Qt::ItemFlags f = QAbstractTableModel::flags(index);
+    if (index.isValid() && index.column() == ColTag)
+        f |= Qt::ItemIsUserCheckable | Qt::ItemIsEditable;
+    return f;
+}
+
+bool RNetFrameModel::setData(const QModelIndex &index, const QVariant &value, int role)
+{
+    if (!index.isValid() || index.column() != ColTag || role != Qt::CheckStateRole)
+        return false;
+
+    if (index.row() < 0 || index.row() >= static_cast<int>(m_rows.size()))
+        return false;
+
+    const RowBucket &bucket = m_rows[static_cast<std::size_t>(index.row())];
+    const bool enabled = value.toInt() == Qt::Checked;
+
+    if (enabled)
+        m_taggedKeys.insert(bucket.key);
+    else
+        m_taggedKeys.remove(bucket.key);
+
+    const QString name = nameForKey(bucket.key);
+    emit dataChanged(index, index, {Qt::CheckStateRole});
+    emit tagStateChanged(bucket.key, name, enabled);
+    return true;
+}
+
 void RNetFrameModel::clear()
 {
-    for (const RowBucket &bucket : m_rows)
-    {
-        if (!bucket.tagged)
-            continue;
-        const RNetFrame *frame = bucket.history.empty() ? nullptr : bucket.history.back().get();
-        emit tagStateChanged(bucket.key, frame ? frame->name() : QStringLiteral("RNet"), false);
-    }
     beginResetModel();
     m_rows.clear();
     m_rowByKey.clear();
+    m_taggedKeys.clear();
     endResetModel();
 }
 
@@ -223,6 +166,7 @@ void RNetFrameModel::addFrame(const CanFrame &frame)
         return;
 
     const quint64 key = decoded->getKey();
+    const QString name = decoded->name();
     auto it = m_rowByKey.find(key);
 
     if (it == m_rowByKey.end())
@@ -254,16 +198,8 @@ void RNetFrameModel::addFrame(const CanFrame &frame)
                          {Qt::DisplayRole, Qt::CheckStateRole});
     }
 
-    const int row = (it == m_rowByKey.end()) ? static_cast<int>(m_rows.size()) - 1 : it.value();
-    if (row >= 0 && row < static_cast<int>(m_rows.size()))
-    {
-        const RowBucket &bucket = m_rows[static_cast<std::size_t>(row)];
-        if (bucket.tagged)
-        {
-            const RNetFrame *latest = bucket.history.empty() ? nullptr : bucket.history.back().get();
-            emit taggedFrameReceived(bucket.key, latest ? latest->name() : QStringLiteral("RNet"), frame);
-        }
-    }
+    if (m_taggedKeys.contains(key))
+        emit taggedFrameReceived(key, name, frame);
 }
 
 const RNetFrame *RNetFrameModel::latestFrameAt(int row) const
@@ -286,6 +222,22 @@ const std::vector<std::unique_ptr<RNetFrame>> *RNetFrameModel::historyAt(int row
     return &m_rows[static_cast<std::size_t>(row)].history;
 }
 
+const std::vector<std::unique_ptr<RNetFrame>> *RNetFrameModel::historyForKey(quint64 key) const
+{
+    auto it = m_rowByKey.constFind(key);
+    if (it == m_rowByKey.constEnd())
+        return nullptr;
+    return historyAt(it.value());
+}
+
+QString RNetFrameModel::nameForKey(quint64 key) const
+{
+    const auto *history = historyForKey(key);
+    if (!history || history->empty() || !history->back())
+        return QString();
+    return history->back()->name();
+}
+
 QString RNetFrameModel::formatPayload(const QByteArray &data)
 {
     if (data.isEmpty())
@@ -303,33 +255,4 @@ QString RNetFrameModel::formatPayload(const QByteArray &data)
     }
 
     return out;
-}
-
-
-bool RNetFrameModel::isTaggedKey(quint64 key) const
-{
-    auto it = m_rowByKey.constFind(key);
-    if (it == m_rowByKey.constEnd())
-        return false;
-    const int row = it.value();
-    return row >= 0 && row < static_cast<int>(m_rows.size()) && m_rows[static_cast<std::size_t>(row)].tagged;
-}
-
-QVector<CanFrame> RNetFrameModel::historyFramesForKey(quint64 key) const
-{
-    QVector<CanFrame> frames;
-    const auto it = m_rowByKey.constFind(key);
-    if (it == m_rowByKey.cend())
-        return frames;
-    const int row = it.value();
-    if (row < 0 || row >= static_cast<int>(m_rows.size()))
-        return frames;
-    const RowBucket &bucket = m_rows[static_cast<std::size_t>(row)];
-    frames.reserve(static_cast<int>(bucket.history.size()));
-    for (const auto &entry : bucket.history)
-    {
-        if (entry)
-            frames.push_back(static_cast<const CanFrame &>(*entry));
-    }
-    return frames;
 }

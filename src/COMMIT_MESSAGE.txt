@@ -1,0 +1,5 @@
+Show plot checkbox in R-Net table
+
+- Draw Qt checkbox indicators for checkable R-Net table cells.
+- Keep plot selection tied to explicitly checked R-Net message types.
+- Preserve existing custom row/text rendering for all other columns.

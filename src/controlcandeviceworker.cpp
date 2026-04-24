@@ -1,11 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-only
-/*
- * QtRNetAnalyzer
- *
- * Copyright (c) 2026
- * ChatGPT (GPT-5.4 Thinking)
- * Jürgen Willi Sievers <JSievers@NadiSoft.de>
- */
 #include "controlcandeviceworker.h"
 
 #include <algorithm>
@@ -31,8 +23,6 @@ QString ControlCanDeviceWorker::resultToString(long result) const
     return QStringLiteral("result=%1").arg(result);
 }
 
-#if RNET_HAS_CONTROLCAN
-
 bool ControlCanDeviceWorker::initChannel(const ChannelConfig &cfg, QString *errorMessage)
 {
     if (!cfg.enabled)
@@ -46,24 +36,30 @@ bool ControlCanDeviceWorker::initChannel(const ChannelConfig &cfg, QString *erro
     initCfg.Timing1 = cfg.timing1;
     initCfg.Mode = cfg.mode;
 
-    const long initRes = static_cast<long>(VCI_InitCAN(m_config.deviceType, m_config.deviceIndex, cfg.canIndex, &initCfg));
+    const long initRes = static_cast<long>(
+        VCI_InitCAN(m_config.deviceType, m_config.deviceIndex, cfg.canIndex, &initCfg));
     if (initRes != 1)
     {
         if (errorMessage)
         {
-            *errorMessage = QStringLiteral("VCI_InitCAN(ch%1) failed: %2").arg(cfg.canIndex + 1).arg(resultToString(initRes));
+            *errorMessage = QStringLiteral("VCI_InitCAN(ch%1) failed: %2")
+            .arg(cfg.canIndex + 1)
+                .arg(resultToString(initRes));
         }
         return false;
     }
 
     VCI_ClearBuffer(m_config.deviceType, m_config.deviceIndex, cfg.canIndex);
 
-    const long startRes = static_cast<long>(VCI_StartCAN(m_config.deviceType, m_config.deviceIndex, cfg.canIndex));
+    const long startRes = static_cast<long>(
+        VCI_StartCAN(m_config.deviceType, m_config.deviceIndex, cfg.canIndex));
     if (startRes != 1)
     {
         if (errorMessage)
         {
-            *errorMessage = QStringLiteral("VCI_StartCAN(ch%1) failed: %2").arg(cfg.canIndex + 1).arg(resultToString(startRes));
+            *errorMessage = QStringLiteral("VCI_StartCAN(ch%1) failed: %2")
+            .arg(cfg.canIndex + 1)
+                .arg(resultToString(startRes));
         }
         return false;
     }
@@ -86,18 +82,21 @@ bool ControlCanDeviceWorker::openDevice(const DeviceOpenConfig &config, QString 
     m_rx0 = m_rx1 = m_tx0 = m_tx1 = m_err0 = m_err1 = 0;
     m_txQueue.clear();
 
-    const long openRes = static_cast<long>(VCI_OpenDevice(m_config.deviceType, m_config.deviceIndex, 0));
+    const long openRes = static_cast<long>(
+        VCI_OpenDevice(m_config.deviceType, m_config.deviceIndex, 0));
     if (openRes != 1)
     {
         if (errorMessage)
         {
-            *errorMessage = QStringLiteral("VCI_OpenDevice failed: %1").arg(resultToString(openRes));
+            *errorMessage = QStringLiteral("VCI_OpenDevice failed: %1")
+            .arg(resultToString(openRes));
         }
         return false;
     }
 
     QString localError;
-    if (!initChannel(m_config.channel0, &localError) || !initChannel(m_config.channel1, &localError))
+    if (!initChannel(m_config.channel0, &localError) ||
+        !initChannel(m_config.channel1, &localError))
     {
         VCI_CloseDevice(m_config.deviceType, m_config.deviceIndex);
         if (errorMessage)
@@ -132,9 +131,14 @@ void ControlCanDeviceWorker::closeDevice()
     QMutexLocker locker(&m_mutex);
 
     if (m_config.channel0.enabled)
+    {
         VCI_ResetCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel0.canIndex);
+    }
+
     if (m_config.channel1.enabled)
+    {
         VCI_ResetCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel1.canIndex);
+    }
 
     VCI_CloseDevice(m_config.deviceType, m_config.deviceIndex);
     m_open = false;
@@ -144,6 +148,79 @@ void ControlCanDeviceWorker::closeDevice()
 
     emit statusMessage(QStringLiteral("Device closed"), false);
     emit deviceStateChanged(false);
+}
+
+bool ControlCanDeviceWorker::isOpen() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_open;
+}
+
+void ControlCanDeviceWorker::queueTransmit(int channel,
+                                           quint32 id,
+                                           const QByteArray &data,
+                                           bool extended,
+                                           bool remote)
+{
+    QMutexLocker locker(&m_mutex);
+
+    if (!m_open)
+    {
+        emit statusMessage(QStringLiteral("Transmit ignored: device not open"), true);
+        return;
+    }
+
+    CanFrame tx;
+    tx.channel = channel;
+    tx.id = id;
+    tx.data = data;
+    tx.extended = extended;
+    tx.remote = remote;
+
+    m_txQueue.push_back(tx);
+    m_wait.wakeAll();
+}
+
+void ControlCanDeviceWorker::clearHardwareBuffers()
+{
+    QMutexLocker locker(&m_mutex);
+
+    if (!m_open)
+        return;
+
+    if (m_config.channel0.enabled)
+    {
+        VCI_ClearBuffer(m_config.deviceType, m_config.deviceIndex, m_config.channel0.canIndex);
+    }
+
+    if (m_config.channel1.enabled)
+    {
+        VCI_ClearBuffer(m_config.deviceType, m_config.deviceIndex, m_config.channel1.canIndex);
+    }
+
+    emit statusMessage(QStringLiteral("Hardware buffers cleared"), false);
+}
+
+void ControlCanDeviceWorker::resetChannels()
+{
+    QMutexLocker locker(&m_mutex);
+
+    if (!m_open)
+        return;
+
+    if (m_config.channel0.enabled)
+    {
+        VCI_ResetCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel0.canIndex);
+        VCI_StartCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel0.canIndex);
+    }
+
+    if (m_config.channel1.enabled)
+    {
+        VCI_ResetCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel1.canIndex);
+        VCI_StartCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel1.canIndex);
+    }
+
+    emit statusMessage(QStringLiteral("Channels reset"), false);
 }
 
 CanFrame ControlCanDeviceWorker::toFrame(const VCI_CAN_OBJ &obj, int channel, direction_t direction) const
@@ -157,7 +234,6 @@ CanFrame ControlCanDeviceWorker::toFrame(const VCI_CAN_OBJ &obj, int channel, di
     frame.error = false;
     frame.data = QByteArray(reinterpret_cast<const char *>(obj.Data), obj.DataLen);
     frame.channel = channel;
-    frame.direction = direction;
     return frame;
 }
 
@@ -173,31 +249,41 @@ void ControlCanDeviceWorker::processPendingTx()
     for (const CanFrame &tx : queue)
     {
         VCI_CAN_OBJ obj{};
+
         obj.ID = tx.id;
         obj.SendType = 1;
         obj.RemoteFlag = tx.remote ? 1 : 0;
         obj.ExternFlag = tx.extended ? 1 : 0;
         obj.DataLen = static_cast<BYTE>(std::min(static_cast<qsizetype>(8), tx.data.size()));
-        for (int i = 0; i < obj.DataLen; ++i)
-            obj.Data[i] = static_cast<UCHAR>(tx.data.at(i));
 
-        const DWORD canIndex = (tx.channel == 1) ? m_config.channel1.canIndex : m_config.channel0.canIndex;
-        const long sent = static_cast<long>(VCI_Transmit(m_config.deviceType, m_config.deviceIndex, canIndex, &obj, 1));
-        if (sent == 1)
+        for (int i = 0; i < obj.DataLen; ++i)
         {
-            if (tx.channel == 1)
-                ++m_tx1;
-            else
+            obj.Data[i] = static_cast<BYTE>(tx.data.at(i));
+        }
+
+        const long res = static_cast<long>(
+            VCI_Transmit(m_config.deviceType, m_config.deviceIndex, tx.channel, &obj, 1));
+
+        if (res == 1)
+        {
+            if (tx.channel == 0)
                 ++m_tx0;
-            emit frameTransmitted(tx);
+            else
+                ++m_tx1;
+
+            emit frameTransmitted(toFrame(obj,tx.channel,dir_tx));
         }
         else
         {
-            if (tx.channel == 1)
-                ++m_err1;
-            else
+            if (tx.channel == 0)
                 ++m_err0;
-            emit statusMessage(QStringLiteral("Transmit failed on channel %1").arg(tx.channel), true);
+            else
+                ++m_err1;
+
+            emit statusMessage(QStringLiteral("VCI_Transmit(ch%1) failed: %2")
+                                   .arg(tx.channel + 1)
+                                   .arg(resultToString(res)),
+                               true);
         }
     }
 }
@@ -207,26 +293,45 @@ void ControlCanDeviceWorker::processRxForChannel(const ChannelConfig &cfg)
     if (!cfg.enabled)
         return;
 
-    QVector<CanFrame> batch;
-    batch.reserve(m_config.receiveBatch);
+    const int len = std::max(64, m_config.receiveBatch);
+    QVector<VCI_CAN_OBJ> buf(len);
 
-    while (batch.size() < m_config.receiveBatch)
+    const long count = static_cast<long>(
+        VCI_Receive(m_config.deviceType,
+                    m_config.deviceIndex,
+                    cfg.canIndex,
+                    buf.data(),
+                    len,
+                    0));
+
+    if (count > 0)
     {
-        VCI_CAN_OBJ obj{};
-        const long received = static_cast<long>(VCI_Receive(m_config.deviceType, m_config.deviceIndex, cfg.canIndex, &obj, 1, 0));
-        if (received <= 0)
-            break;
+        QVector<CanFrame> frames;
+        frames.reserve(static_cast<int>(count));
 
-        batch.push_back(toFrame(obj, static_cast<int>(cfg.canIndex), dir_rx));
+        for (long i = 0; i < count; ++i)
+        {
+            frames.push_back(toFrame(buf[static_cast<int>(i)], cfg.canIndex, dir_rx));
+        }
 
-        if (cfg.canIndex == m_config.channel1.canIndex)
-            ++m_rx1;
+        if (cfg.canIndex == 0)
+            m_rx0 += static_cast<quint64>(count);
         else
-            ++m_rx0;
-    }
+            m_rx1 += static_cast<quint64>(count);
 
-    if (!batch.isEmpty())
-        emit frameBatchReady(batch);
+        emit frameBatchReady(frames);
+    }
+    else if (count == -1)
+    {
+        if (cfg.canIndex == 0)
+            ++m_err0;
+        else
+            ++m_err1;
+
+        emit statusMessage(QStringLiteral("VCI_Receive(ch%1) failed")
+                               .arg(cfg.canIndex + 1),
+                           true);
+    }
 }
 
 void ControlCanDeviceWorker::run()
@@ -246,120 +351,9 @@ void ControlCanDeviceWorker::run()
         emit countersUpdated(m_rx0, m_rx1, m_tx0, m_tx1, m_err0, m_err1);
 
         QMutexLocker locker(&m_mutex);
-        if (m_running && m_txQueue.isEmpty())
-            m_wait.wait(&m_mutex, std::max(1, m_config.pollDelayMs));
+        if (!m_running)
+            break;
+
+        m_wait.wait(&m_mutex, std::max(1, m_config.pollDelayMs));
     }
-}
-
-void ControlCanDeviceWorker::clearHardwareBuffers()
-{
-    QMutexLocker locker(&m_mutex);
-    if (!m_open)
-        return;
-    if (m_config.channel0.enabled)
-        VCI_ClearBuffer(m_config.deviceType, m_config.deviceIndex, m_config.channel0.canIndex);
-    if (m_config.channel1.enabled)
-        VCI_ClearBuffer(m_config.deviceType, m_config.deviceIndex, m_config.channel1.canIndex);
-    emit statusMessage(QStringLiteral("Hardware buffers cleared"), false);
-}
-
-void ControlCanDeviceWorker::resetChannels()
-{
-    QMutexLocker locker(&m_mutex);
-    if (!m_open)
-        return;
-    if (m_config.channel0.enabled)
-    {
-        VCI_ResetCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel0.canIndex);
-        VCI_StartCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel0.canIndex);
-    }
-    if (m_config.channel1.enabled)
-    {
-        VCI_ResetCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel1.canIndex);
-        VCI_StartCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel1.canIndex);
-    }
-    emit statusMessage(QStringLiteral("Channels reset"), false);
-}
-
-#else
-
-bool ControlCanDeviceWorker::initChannel(const ChannelConfig &, QString *)
-{
-    return true;
-}
-
-bool ControlCanDeviceWorker::openDevice(const DeviceOpenConfig &config, QString *errorMessage)
-{
-    QMutexLocker locker(&m_mutex);
-    m_config = config;
-    if (errorMessage)
-        *errorMessage = QStringLiteral("ControlCAN SDK/header not found. Build with the vendor SDK in third_party/ and enable ENABLE_CONTROLCAN.");
-    emit statusMessage(QStringLiteral("ControlCAN support not available in this build"), true);
-    return false;
-}
-
-void ControlCanDeviceWorker::closeDevice()
-{
-    QMutexLocker locker(&m_mutex);
-    m_running = false;
-    m_open = false;
-    m_txQueue.clear();
-}
-
-void ControlCanDeviceWorker::processPendingTx()
-{
-    QMutexLocker locker(&m_mutex);
-    if (!m_txQueue.isEmpty())
-    {
-        m_txQueue.clear();
-        emit statusMessage(QStringLiteral("Transmit ignored: ControlCAN support not available in this build"), true);
-    }
-}
-
-void ControlCanDeviceWorker::processRxForChannel(const ChannelConfig &)
-{
-}
-
-void ControlCanDeviceWorker::run()
-{
-}
-
-void ControlCanDeviceWorker::clearHardwareBuffers()
-{
-    emit statusMessage(QStringLiteral("Hardware buffer clear ignored: ControlCAN support not available"), true);
-}
-
-void ControlCanDeviceWorker::resetChannels()
-{
-    emit statusMessage(QStringLiteral("Reset ignored: ControlCAN support not available"), true);
-}
-
-#endif
-
-bool ControlCanDeviceWorker::isOpen() const
-{
-    QMutexLocker locker(&m_mutex);
-    return m_open;
-}
-
-void ControlCanDeviceWorker::queueTransmit(int channel, quint32 id, const QByteArray &data, bool extended, bool remote)
-{
-    QMutexLocker locker(&m_mutex);
-
-    if (!m_open)
-    {
-        emit statusMessage(QStringLiteral("Transmit ignored: device not open"), true);
-        return;
-    }
-
-    CanFrame tx;
-    tx.channel = channel;
-    tx.id = id;
-    tx.data = data;
-    tx.extended = extended;
-    tx.remote = remote;
-    tx.direction = dir_tx;
-
-    m_txQueue.push_back(tx);
-    m_wait.wakeAll();
 }

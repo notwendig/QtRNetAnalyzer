@@ -1,17 +1,7 @@
-// SPDX-License-Identifier: GPL-3.0-only
-/*
- * QtRNetAnalyzer
- *
- * Copyright (c) 2026
- * ChatGPT (GPT-5.4 Thinking)
- * Jürgen Willi Sievers <JSievers@NadiSoft.de>
- */
 #include "mainwindow.h"
 
 #include "liveframedelegate.h"
 #include "rnetframedelegate.h"
-#include "signalplotwindow.h"
-#include "tagbardelegate.h"
 
 #include <QAbstractItemView>
 #include <QAbstractTableModel>
@@ -34,9 +24,9 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
-#include <QSortFilterProxyModel>
 #include <QRegularExpression>
 #include <QSpinBox>
+#include <QSortFilterProxyModel>
 #include <QStatusBar>
 #include <QTableView>
 #include <QTabWidget>
@@ -76,35 +66,49 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
     , m_simulationMode(!inputFile.trimmed().isEmpty())
     , m_worker(new ControlCanDeviceWorker(this))
 {
-    setWindowTitle(QStringLiteral("QtRNetAnalyzer"));
+    setWindowTitle(QStringLiteral("Qt6 ControlCAN Analyzer Pro"));
     resize(1400, 900);
     setCentralWidget(createCentral());
 
     m_liveModel = new LiveFrameModel(this);
     m_rnetModel = new RNetFrameModel(this);
 
-    m_signalPlotWindow = new SignalPlotWindow(nullptr);
-
     m_liveProxy = new QSortFilterProxyModel(this);
     m_liveProxy->setSourceModel(m_liveModel);
-    m_liveProxy->setSortRole(LiveFrameModel::SortRole);
     m_liveProxy->setDynamicSortFilter(true);
-    m_liveProxy->setSortCaseSensitivity(Qt::CaseInsensitive);
 
     m_rnetProxy = new QSortFilterProxyModel(this);
     m_rnetProxy->setSourceModel(m_rnetModel);
-    m_rnetProxy->setSortRole(RNetFrameModel::SortRole);
     m_rnetProxy->setDynamicSortFilter(true);
-    m_rnetProxy->setSortCaseSensitivity(Qt::CaseInsensitive);
 
     m_liveView->setModel(m_liveProxy);
     m_liveView->setItemDelegate(new LiveFrameDelegate(m_liveView));
     m_rnetView->setModel(m_rnetProxy);
-    m_rnetView->setItemDelegateForColumn(RNetFrameModel::ColTag, new TagBarDelegate(m_rnetView));
     m_rnetView->setItemDelegate(new RNetFrameDelegate(m_rnetView));
 
-    m_liveView->sortByColumn(LiveFrameModel::ColHwTimestamp, Qt::AscendingOrder);
-    m_rnetView->sortByColumn(RNetFrameModel::ColId, Qt::AscendingOrder);
+    connect(m_rnetModel, &RNetFrameModel::tagStateChanged, this, [this](quint64 key, const QString &name, bool enabled) {
+        if (!m_signalView)
+            return;
+
+        if (!enabled) {
+            m_signalView->removeSource(key);
+            return;
+        }
+
+        const auto *history = m_rnetModel->historyForKey(key);
+        if (!history)
+            return;
+
+        for (const auto &entry : *history) {
+            if (entry)
+                m_signalView->addFrame(key, name, *entry);
+        }
+    });
+
+    connect(m_rnetModel, &RNetFrameModel::taggedFrameReceived, this, [this](quint64 key, const QString &name, const CanFrame &frame) {
+        if (m_signalView)
+            m_signalView->addFrame(key, name, frame);
+    });
 
     connect(m_openBtn, &QPushButton::clicked, this, &MainWindow::openDevice);
     connect(m_closeBtn, &QPushButton::clicked, this, &MainWindow::closeDevice);
@@ -112,15 +116,12 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
     connect(m_logBtn, &QPushButton::clicked, this, &MainWindow::toggleLogging);
     connect(m_clearBtn, &QPushButton::clicked, this, &MainWindow::clearTables);
     connect(m_rnetPresetBtn, &QPushButton::clicked, this, &MainWindow::applyRNetPreset);
-    connect(m_showTaggedSignalsBtn, &QPushButton::clicked, this, &MainWindow::showTaggedSignalsWindow);
 
     connect(m_worker, &ControlCanDeviceWorker::frameBatchReady, this, &MainWindow::onFrameBatch);
     connect(m_worker, &ControlCanDeviceWorker::frameTransmitted, this, &MainWindow::onFrameTx);
     connect(m_worker, &ControlCanDeviceWorker::countersUpdated, this, &MainWindow::onCounters);
     connect(m_worker, &ControlCanDeviceWorker::statusMessage, this, &MainWindow::onStatusMessage);
     connect(m_worker, &ControlCanDeviceWorker::deviceStateChanged, this, &MainWindow::onDeviceStateChanged);
-    connect(m_rnetModel, &RNetFrameModel::tagStateChanged, this, &MainWindow::onRNetTagStateChanged);
-    connect(m_rnetModel, &RNetFrameModel::taggedFrameReceived, m_signalPlotWindow, &SignalPlotWindow::appendTaggedFrame);
 
     applyRNetPreset();
     onDeviceStateChanged(false);
@@ -272,6 +273,7 @@ QTabWidget *MainWindow::createViews()
     auto *tabs = new QTabWidget(this);
     tabs->addTab(createLiveTab(), QStringLiteral("Live Frames"));
     tabs->addTab(createRNetTab(), QStringLiteral("R-Net View"));
+    tabs->addTab(createSignalTab(), QStringLiteral("Signal View"));
     tabs->addTab(createLogTab(), QStringLiteral("Status / Log"));
     return tabs;
 }
@@ -286,8 +288,6 @@ QWidget *MainWindow::createLiveTab()
     m_liveView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_liveView->setSelectionMode(QAbstractItemView::SingleSelection);
     m_liveView->setSortingEnabled(true);
-    m_liveView->horizontalHeader()->setSortIndicatorShown(true);
-    m_liveView->horizontalHeader()->setSectionsClickable(true);
     m_liveView->verticalHeader()->setVisible(false);
     m_liveView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_liveView->horizontalHeader()->setStretchLastSection(true);
@@ -302,28 +302,29 @@ QWidget *MainWindow::createRNetTab()
     auto *layout = new QVBoxLayout(w);
 
     auto *hint = new QLabel(
-        QStringLiteral("Optimized for 125 kbit/s R-Net capture and candump replay. Erste Spalte = Checkbox; getaggte Botschaften werden inklusive History im Kurvenfenster live angezeigt."),
+        QStringLiteral("Optimized for 125 kbit/s R-Net capture and candump replay. Known frames are decoded on demand."),
         w);
     hint->setWordWrap(true);
-
-    m_showTaggedSignalsBtn = new QPushButton(QStringLiteral("Live-Kurven für Tags öffnen"), w);
 
     m_rnetView = new QTableView(w);
     m_rnetView->setAlternatingRowColors(true);
     m_rnetView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_rnetView->setSelectionMode(QAbstractItemView::SingleSelection);
     m_rnetView->setSortingEnabled(true);
-    m_rnetView->horizontalHeader()->setSortIndicatorShown(true);
-    m_rnetView->horizontalHeader()->setSectionsClickable(true);
     m_rnetView->verticalHeader()->setVisible(false);
     m_rnetView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_rnetView->horizontalHeader()->setStretchLastSection(true);
-    m_rnetView->setColumnWidth(RNetFrameModel::ColTag, 64);
 
     layout->addWidget(hint);
-    layout->addWidget(m_showTaggedSignalsBtn);
     layout->addWidget(m_rnetView);
     return w;
+}
+
+
+QWidget *MainWindow::createSignalTab()
+{
+    m_signalView = new SignalViewWindow(this);
+    return m_signalView;
 }
 
 QWidget *MainWindow::createLogTab()
@@ -640,9 +641,9 @@ void MainWindow::clearTables()
 {
     m_liveModel->clear();
     static_cast<RNetFrameModel *>(m_rnetModel)->clear();
+    if (m_signalView)
+        m_signalView->clear();
     m_logView->clear();
-    if (m_signalPlotWindow)
-        m_signalPlotWindow->clearAll();
     m_displayedFrames = 0;
 }
 
@@ -749,34 +750,4 @@ void MainWindow::startSimulationIfRequested()
         onStatusMessage(error, true);
         return;
     }
-}
-
-
-
-void MainWindow::onRNetTagStateChanged(quint64 key, const QString &name, bool tagged)
-{
-    if (!m_signalPlotWindow)
-        return;
-
-    m_signalPlotWindow->setTagState(key, name, tagged);
-
-    if (!tagged)
-        return;
-
-    m_signalPlotWindow->setTaggedHistory(key, name, m_rnetModel->historyFramesForKey(key));
-    m_signalPlotWindow->show();
-    m_signalPlotWindow->setWindowState((m_signalPlotWindow->windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
-    m_signalPlotWindow->raise();
-    m_signalPlotWindow->activateWindow();
-}
-
-void MainWindow::showTaggedSignalsWindow()
-{
-    if (!m_signalPlotWindow)
-        return;
-
-    m_signalPlotWindow->show();
-    m_signalPlotWindow->setWindowState((m_signalPlotWindow->windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
-    m_signalPlotWindow->raise();
-    m_signalPlotWindow->activateWindow();
 }
