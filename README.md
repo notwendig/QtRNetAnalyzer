@@ -1,32 +1,40 @@
 # QtRNetAnalyzer
 
-Qt6 desktop analyzer for CAN and R-Net traffic with live tables, R-Net decoding, tagging, and live signal plots.
+Qt6 desktop analyzer for CAN and R-Net traffic with live tables, R-Net decoding, tagging, and live signal plotting.
 
 ## Features
 
-- live CAN table with sorting
-- decoded R-Net table with aggregation by type key
-- taggable R-Net messages
-- live plot window for tagged frames including accumulated history
-- simulator mode for development without hardware
-- optional proprietary ControlCAN integration
+- Live CAN table with sorting
+- Decoded R-Net table with aggregation by type key
+- Taggable R-Net messages
+- Live plot window for tagged frames including accumulated history
+- Simulator mode for development without hardware
+- Optional proprietary ControlCAN integration
 
 ## Screenshots
 
 ### Live Table
-Real-time CAN frame capture with timestamp, ID, DLC and raw payload view.
+Real-time CAN frame capture with timestamp, ID, DLC and raw payload view.  
 Optimized for high bus load and continuous monitoring.
-<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-50-01.png" width="700">
+
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-50-01.png" width="900">
+
+---
 
 ### R-Net Decoder Table
 Decoded R-Net frames with type grouping, counters and parameter extraction.
-<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-58-44.png" width="700">
 
-### R-Net Signal-Plot Table
-Live visualization of tagged R-Net messages.
-Displays payload evolution over time with full history support.
-<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-57-49.png" width="700">
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-58-44.png" width="900">
 
+---
+
+### R-Net Signal Plot
+Interactive live visualization of tagged R-Net messages.  
+Tracks payload evolution over time with full history support.
+
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-57-49.png" width="900">
+
+---
 ## Build
 
 ### Simulator-only build
@@ -37,6 +45,7 @@ cd build
 cmake ..
 cmake --build .
 ./QtRNetAnalyzer --input <candump.txt>
+<<<<<<< HEAD
 ```
 
 ### Build with proprietary ControlCAN SDK
@@ -81,3 +90,5 @@ Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International. See `LI
 
 The optional ControlCAN integration depends on vendor-provided proprietary files that are **not** part of this repository.
 You must obtain those files yourself and place them locally under `third_party/`.
+=======
+>>>>>>> chatgpt
