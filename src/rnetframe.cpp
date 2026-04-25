@@ -1,11 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-only
-/*
- * QtRNetAnalyzer
- *
- * Copyright (c) 2026
- * ChatGPT (GPT-5.4 Thinking)
- * Jürgen Willi Sievers <JSievers@NadiSoft.de>
- */
 #include "rnetframe.h"
 
 #include <QStringList>

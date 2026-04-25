@@ -1,11 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-only
-/*
- * QtRNetAnalyzer
- *
- * Copyright (c) 2026
- * ChatGPT (GPT-5.4 Thinking)
- * Jürgen Willi Sievers <JSievers@NadiSoft.de>
- */
 #include "liveframemodel.h"
 
 #include <QBrush>
@@ -66,7 +58,7 @@ QVariant LiveFrameModel::data(const QModelIndex &index, int role) const
             return QString::number(frame.channel);
 
         case ColDirection:
-            return frame.direction == dir_tx ? QStringLiteral("TX") : QStringLiteral("RX");
+            return frame.direction == dir_tx? QStringLiteral("TX"):QStringLiteral("RX");
 
         case ColId:
             return formatId(frame);
@@ -83,33 +75,6 @@ QVariant LiveFrameModel::data(const QModelIndex &index, int role) const
         case ColData:
             return formatData(frame.data);
 
-        default:
-            return {};
-        }
-    }
-
-    if (role == SortRole)
-    {
-        switch (index.column())
-        {
-        case ColHostTime:
-            return frame.hostTime;
-        case ColHwTimestamp:
-            return QVariant::fromValue<qulonglong>(frame.hwTimestamp);
-        case ColChannel:
-            return frame.channel;
-        case ColDirection:
-            return frame.direction == dir_tx ? 1 : 0;
-        case ColId:
-            return QVariant::fromValue<qulonglong>(frame.id);
-        case ColStdExt:
-            return frame.extended ? 1 : 0;
-        case ColType:
-            return frame.error ? 2 : (frame.remote ? 1 : 0);
-        case ColDlc:
-            return frame.data.size();
-        case ColData:
-            return formatData(frame.data);
         default:
             return {};
         }

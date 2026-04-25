@@ -1,11 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-only
-/*
- * QtRNetAnalyzer
- *
- * Copyright (c) 2026
- * ChatGPT (GPT-5.4 Thinking)
- * Jürgen Willi Sievers <JSievers@NadiSoft.de>
- */
 #pragma once
 
 #include <QDateTime>
@@ -14,19 +6,9 @@
 #include <QString>
 #include <QVector>
 #include <QWaitCondition>
-#include <QtGlobal>
 
 #include "canframe.h"
-
-#if __has_include("controlcan.h")
 #include "controlcan.h"
-#define RNET_HAS_CONTROLCAN 1
-#else
-#define RNET_HAS_CONTROLCAN 0
-using DWORD = quint32;
-using UCHAR = quint8;
-constexpr DWORD VCI_USBCAN2 = 4;
-#endif
 
 struct ChannelConfig
 {
@@ -82,9 +64,7 @@ class ControlCanDeviceWorker final : public QThread
     bool initChannel(const ChannelConfig &cfg, QString *errorMessage);
     void processRxForChannel(const ChannelConfig &cfg);
     void processPendingTx();
-#if RNET_HAS_CONTROLCAN
     CanFrame toFrame(const VCI_CAN_OBJ &obj, int channel, direction_t direction) const;
-#endif
 
     mutable QMutex m_mutex;
     QWaitCondition m_wait;

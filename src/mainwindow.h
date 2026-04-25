@@ -1,19 +1,13 @@
-// SPDX-License-Identifier: GPL-3.0-only
-/*
- * QtRNetAnalyzer
- *
- * Copyright (c) 2026
- * ChatGPT (GPT-5.4 Thinking)
- * Jürgen Willi Sievers <JSievers@NadiSoft.de>
- */
 #pragma once
 
 #include <QMainWindow>
+#include <QSet>
 
 #include "canlogger.h"
 #include "controlcandeviceworker.h"
 #include "liveframemodel.h"
 #include "rnetframemodel.h"
+#include "signalviewwindow.h"
 
 QT_BEGIN_NAMESPACE
 class QCheckBox;
@@ -30,7 +24,6 @@ QT_END_NAMESPACE
 
 class QAbstractTableModel;
 class QSortFilterProxyModel;
-class SignalPlotWindow;
 
 class MainWindow final : public QMainWindow
 {
@@ -52,8 +45,6 @@ class MainWindow final : public QMainWindow
     void onStatusMessage(const QString &message, bool error);
     void onDeviceStateChanged(bool open);
     void startSimulationIfRequested();
-    void showTaggedSignalsWindow();
-    void onRNetTagStateChanged(quint64 key, const QString &name, bool tagged);
 
   private:
     struct ChannelWidgets {
@@ -72,7 +63,10 @@ class MainWindow final : public QMainWindow
     QTabWidget *createViews();
     QWidget *createLiveTab();
     QWidget *createRNetTab();
+    QWidget *createSignalTab();
     QWidget *createLogTab();
+    void openSignalViewWindow();
+    void updateSignalViewAvailability();
 
     DeviceOpenConfig currentConfigFromUi(bool *ok = nullptr, QString *error = nullptr) const;
     static bool parseHexUInt(const QString &text, quint32 *value);
@@ -100,7 +94,6 @@ class MainWindow final : public QMainWindow
     QPushButton *m_logBtn = nullptr;
     QPushButton *m_clearBtn = nullptr;
     QPushButton *m_rnetPresetBtn = nullptr;
-    QPushButton *m_showTaggedSignalsBtn = nullptr;
 
     ChannelWidgets m_ch0;
     ChannelWidgets m_ch1;
@@ -116,12 +109,14 @@ class MainWindow final : public QMainWindow
     QTableView *m_liveView = nullptr;
     QTableView *m_rnetView = nullptr;
     QPlainTextEdit *m_logView = nullptr;
+    SignalViewWindow *m_signalView = nullptr;
+    QPushButton *m_signalViewBtn = nullptr;
+    QSet<quint64> m_taggedSignalSources;
 
     LiveFrameModel *m_liveModel = nullptr;
     RNetFrameModel *m_rnetModel = nullptr;
     QSortFilterProxyModel *m_liveProxy = nullptr;
     QSortFilterProxyModel *m_rnetProxy = nullptr;
-    SignalPlotWindow *m_signalPlotWindow = nullptr;
 
     quint64 m_displayedFrames = 0;
 };
