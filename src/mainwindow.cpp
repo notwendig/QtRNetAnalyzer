@@ -91,9 +91,14 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
             return;
 
         if (!enabled) {
+            m_taggedSignalSources.remove(key);
             m_signalView->removeSource(key);
+            updateSignalViewAvailability();
             return;
         }
+
+        m_taggedSignalSources.insert(key);
+        updateSignalViewAvailability();
 
         const auto *history = m_rnetModel->historyForKey(key);
         if (!history)
@@ -141,6 +146,8 @@ MainWindow::~MainWindow()
 {
     m_logger.stop();
     m_worker->closeDevice();
+    delete m_signalView;
+    m_signalView = nullptr;
 }
 
 QWidget *MainWindow::createCentral()
@@ -323,8 +330,49 @@ QWidget *MainWindow::createRNetTab()
 
 QWidget *MainWindow::createSignalTab()
 {
-    m_signalView = new SignalViewWindow(this);
-    return m_signalView;
+    auto *w = new QWidget(this);
+    auto *layout = new QVBoxLayout(w);
+
+    auto *hint = new QLabel(
+        QStringLiteral("Signal View is opened as a detached window. Check at least one row in the R-Net table first."),
+        w);
+    hint->setWordWrap(true);
+
+    m_signalViewBtn = new QPushButton(QStringLiteral("Open detached Signal View"), w);
+    m_signalViewBtn->setEnabled(false);
+
+    m_signalView = new SignalViewWindow(nullptr);
+    m_signalView->setWindowTitle(QStringLiteral("QtRNetAnalyzer - Signal View"));
+    m_signalView->resize(1100, 700);
+    m_signalView->setAttribute(Qt::WA_DeleteOnClose, false);
+    m_signalView->setInputEnabled(false);
+
+    connect(m_signalViewBtn, &QPushButton::clicked, this, &MainWindow::openSignalViewWindow);
+
+    layout->addWidget(hint);
+    layout->addWidget(m_signalViewBtn);
+    layout->addStretch(1);
+    return w;
+}
+
+void MainWindow::openSignalViewWindow()
+{
+    if (!m_signalView || m_taggedSignalSources.isEmpty())
+        return;
+
+    m_signalView->setInputEnabled(true);
+    m_signalView->show();
+    m_signalView->raise();
+    m_signalView->activateWindow();
+}
+
+void MainWindow::updateSignalViewAvailability()
+{
+    const bool available = !m_taggedSignalSources.isEmpty();
+    if (m_signalViewBtn)
+        m_signalViewBtn->setEnabled(available);
+    if (m_signalView)
+        m_signalView->setInputEnabled(available);
 }
 
 QWidget *MainWindow::createLogTab()
@@ -641,8 +689,10 @@ void MainWindow::clearTables()
 {
     m_liveModel->clear();
     static_cast<RNetFrameModel *>(m_rnetModel)->clear();
+    m_taggedSignalSources.clear();
     if (m_signalView)
         m_signalView->clear();
+    updateSignalViewAvailability();
     m_logView->clear();
     m_displayedFrames = 0;
 }

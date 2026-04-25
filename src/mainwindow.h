@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QSet>
 
 #include "canlogger.h"
 #include "controlcandeviceworker.h"
@@ -64,6 +65,8 @@ class MainWindow final : public QMainWindow
     QWidget *createRNetTab();
     QWidget *createSignalTab();
     QWidget *createLogTab();
+    void openSignalViewWindow();
+    void updateSignalViewAvailability();
 
     DeviceOpenConfig currentConfigFromUi(bool *ok = nullptr, QString *error = nullptr) const;
     static bool parseHexUInt(const QString &text, quint32 *value);
@@ -107,6 +110,8 @@ class MainWindow final : public QMainWindow
     QTableView *m_rnetView = nullptr;
     QPlainTextEdit *m_logView = nullptr;
     SignalViewWindow *m_signalView = nullptr;
+    QPushButton *m_signalViewBtn = nullptr;
+    QSet<quint64> m_taggedSignalSources;
 
     LiveFrameModel *m_liveModel = nullptr;
     RNetFrameModel *m_rnetModel = nullptr;

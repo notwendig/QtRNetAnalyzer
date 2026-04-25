@@ -46,6 +46,9 @@ SignalViewWindow::SignalViewWindow(QWidget *parent)
 
     m_plot = new SignalPlotWidget(this);
     m_plot->setModel(&m_history);
+    m_signalTree->setEnabled(false);
+    m_resetZoom->setEnabled(false);
+    m_plot->setEnabled(false);
 
     root->addLayout(side);
     root->addWidget(m_plot, 1);
@@ -53,6 +56,21 @@ SignalViewWindow::SignalViewWindow(QWidget *parent)
     connect(m_signalTree, &QTreeWidget::itemChanged, this, &SignalViewWindow::onSignalItemChanged);
     connect(m_resetZoom, &QPushButton::clicked, m_plot, &SignalPlotWidget::resetZoom);
     connect(m_plot, &SignalPlotWidget::pauseChanged, this, &SignalViewWindow::onPauseChanged);
+}
+
+void SignalViewWindow::setInputEnabled(bool enabled)
+{
+    m_inputEnabled = enabled;
+    m_signalTree->setEnabled(enabled);
+    m_resetZoom->setEnabled(enabled);
+    m_plot->setEnabled(enabled);
+
+    if (!enabled) {
+        m_status->setText(QStringLiteral("Check at least one R-Net row in the R-Net table to enable Signal View selection."));
+        return;
+    }
+
+    m_status->setText(QStringLiteral("Live mode. Only checked signal channels from checked R-Net rows are plotted."));
 }
 
 void SignalViewWindow::addFrame(quint64 sourceKey, const QString &sourceName, const CanFrame &frame)
@@ -80,7 +98,8 @@ void SignalViewWindow::clear()
     m_signalTree->clear();
     m_plot->resetZoom();
     m_plot->refreshView();
-    m_status->setText(QStringLiteral("Signal history cleared."));
+    setInputEnabled(false);
+    m_status->setText(QStringLiteral("Signal history cleared. Check at least one R-Net row to enable Signal View selection."));
 }
 
 void SignalViewWindow::refreshSignals()

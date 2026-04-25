@@ -23,6 +23,7 @@ public:
     void addFrame(quint64 sourceKey, const QString &sourceName, const CanFrame &frame);
     void removeSource(quint64 sourceKey);
     void clear();
+    void setInputEnabled(bool enabled);
 
 public slots:
     void refreshSignals();
@@ -45,4 +46,5 @@ private:
     QPushButton *m_resetZoom = nullptr;
 
     bool m_updatingTree = false;
+    bool m_inputEnabled = false;
 };
