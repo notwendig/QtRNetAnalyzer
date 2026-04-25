@@ -2,7 +2,8 @@
 
 #include <QtGlobal>
 
-namespace {
+namespace
+{
 constexpr quint32 kJoystickId = 0x02000300u;
 constexpr quint32 kBatteryBase = 0x1C0C0000u;
 constexpr quint32 kMotorCurrentBase = 0x14300000u;
@@ -11,12 +12,17 @@ constexpr quint32 kMotorMaxSpeedBase = 0x0A040000u;
 constexpr quint32 kPmHeartbeatBase = 0x0C140000u;
 constexpr quint32 kLampStatusBase = 0x0C000E00u;
 constexpr quint32 kEnableMotorOutputBase = 0x0C180000u;
+
+constexpr quint16 kSignalFrameCount = 0;
+constexpr quint16 kSignalKnownBase = 10;
+constexpr quint16 kSignalPayloadBase = 100;
 }
 
 void SignalHistoryModel::clear()
 {
     m_signals.clear();
     m_sourceNames.clear();
+    m_sourceCounts.clear();
     m_minTime = 0.0;
     m_maxTime = 0.0;
     m_hasTime = false;
@@ -25,6 +31,7 @@ void SignalHistoryModel::clear()
 void SignalHistoryModel::addSample(const SignalSample &sample)
 {
     auto &history = m_signals[sample.key];
+
     if (history.name.isEmpty()) {
         history.sourceKey = sample.sourceKey;
         history.sourceName = m_sourceNames.value(sample.sourceKey);
@@ -33,8 +40,11 @@ void SignalHistoryModel::addSample(const SignalSample &sample)
     }
 
     history.samples.push_back(sample);
-    if (history.samples.size() > kMaxSamplesPerSignal)
-        history.samples.erase(history.samples.begin(), history.samples.begin() + (history.samples.size() - kMaxSamplesPerSignal));
+
+    if (history.samples.size() > kMaxSamplesPerSignal) {
+        history.samples.erase(history.samples.begin(),
+                              history.samples.begin() + (history.samples.size() - kMaxSamplesPerSignal));
+    }
 
     if (!m_hasTime) {
         m_minTime = sample.timeSec;
@@ -49,70 +59,117 @@ void SignalHistoryModel::addSample(const SignalSample &sample)
 
 void SignalHistoryModel::addSamplesFromFrame(quint64 sourceKey, const QString &sourceName, const CanFrame &frame)
 {
-    if (sourceKey == 0 || frame.remote || frame.error)
+    if (sourceKey == 0 || frame.error)
+        return;
+
+    const QString prefix = sourceName.isEmpty() ? QStringLiteral("R-Net") : sourceName;
+    m_sourceNames.insert(sourceKey, prefix);
+
+    // Always add at least one channel for every tagged R-Net row. This makes the
+    // Signal View show the selected R-Net message even when no semantic decoder
+    // channel is known yet or the frame is RTR/no-payload.
+    addFrameCounterSample(sourceKey, prefix, frame);
+
+    if (frame.remote)
         return;
 
     const double t = frameTimeSec(frame);
     const quint32 id = frame.id;
     const QByteArray &d = frame.data;
-    const QString prefix = sourceName.isEmpty() ? QStringLiteral("R-Net") : sourceName;
-    m_sourceNames.insert(sourceKey, prefix);
+    bool producedKnownSignal = false;
 
     // Joystick position: 02000M00#XxYy, signed 8-bit, periodic ~10 ms.
-    if (frame.extended && ((id & 0x2FFF0FFFu) == 0x02000000u || id == kJoystickId) && d.size() >= 2) {
-        addSample(SignalSample(makeSignalKey(sourceKey, 0), sourceKey, prefix + QStringLiteral(" X"), t, s8(d, 0), QStringLiteral("%")));
-        addSample(SignalSample(makeSignalKey(sourceKey, 1), sourceKey, prefix + QStringLiteral(" Y"), t, s8(d, 1), QStringLiteral("%")));
-        return;
+    if (frame.extended && (((id & 0xFFFFF0FFu) == 0x02000000u) || id == kJoystickId) && d.size() >= 2) {
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalKnownBase + 0), sourceKey,
+                               prefix + QStringLiteral(" X"), t, s8(d, 0), QStringLiteral("%")));
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalKnownBase + 1), sourceKey,
+                               prefix + QStringLiteral(" Y"), t, s8(d, 1), QStringLiteral("%")));
+        producedKnownSignal = true;
     }
 
     // Battery level: 1C0C0X00#Pp, percent.
     if (frame.extended && (id & 0xFFFFF0FFu) == kBatteryBase && d.size() >= 1) {
-        addSample(SignalSample(makeSignalKey(sourceKey, 0), sourceKey, prefix, t, u8(d, 0), QStringLiteral("%")));
-        return;
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalKnownBase + 0), sourceKey,
+                               prefix + QStringLiteral(" %"), t, u8(d, 0), QStringLiteral("%")));
+        producedKnownSignal = true;
     }
 
     // Drive motor current/power: 14300X00#LlHh, little-endian raw value.
     if (frame.extended && (id & 0xFFFFF0FFu) == kMotorCurrentBase && d.size() >= 2) {
-        addSample(SignalSample(makeSignalKey(sourceKey, 0), sourceKey, prefix, t, le16(d, 0), QStringLiteral("raw")));
-        return;
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalKnownBase + 0), sourceKey,
+                               prefix + QStringLiteral(" Current"), t, le16(d, 0), QStringLiteral("raw")));
+        producedKnownSignal = true;
     }
 
     // Distance / amp-hour counter: 1C300X04#LLLLLLLLRRRRRRRR, two LE32 channels.
     if (frame.extended && (id & 0xFFFFF0FFu) == kDistanceBase && d.size() >= 8) {
-        addSample(SignalSample(makeSignalKey(sourceKey, 0), sourceKey, prefix + QStringLiteral(" L"), t, le32(d, 0), QStringLiteral("raw")));
-        addSample(SignalSample(makeSignalKey(sourceKey, 1), sourceKey, prefix + QStringLiteral(" R"), t, le32(d, 4), QStringLiteral("raw")));
-        return;
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalKnownBase + 0), sourceKey,
+                               prefix + QStringLiteral(" L"), t, le32(d, 0), QStringLiteral("raw")));
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalKnownBase + 1), sourceKey,
+                               prefix + QStringLiteral(" R"), t, le32(d, 4), QStringLiteral("raw")));
+        producedKnownSignal = true;
     }
 
     // Motor speed max / power attribution: 0A040X00#Pp.
     if (frame.extended && (id & 0xFFFFF0FFu) == kMotorMaxSpeedBase && d.size() >= 1) {
-        addSample(SignalSample(makeSignalKey(sourceKey, 0), sourceKey, prefix, t, u8(d, 0), QStringLiteral("%")));
-        return;
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalKnownBase + 0), sourceKey,
+                               prefix + QStringLiteral(" Max Speed"), t, u8(d, 0), QStringLiteral("%")));
+        producedKnownSignal = true;
     }
 
     // PM heartbeat/status byte: 0C140X00#Xx.
     if (frame.extended && (id & 0xFFFFF0FFu) == kPmHeartbeatBase && d.size() >= 1) {
-        addSample(SignalSample(makeSignalKey(sourceKey, 0), sourceKey, prefix, t, u8(d, 0), QStringLiteral("raw")));
-        return;
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalKnownBase + 0), sourceKey,
+                               prefix + QStringLiteral(" Status"), t, u8(d, 0), QStringLiteral("raw")));
+        producedKnownSignal = true;
     }
 
     // Lamp status bitmap: 0C000E00#MaskBitmap.
     if (frame.extended && (id & 0xFFFFF0FFu) == kLampStatusBase && d.size() >= 2) {
-        addSample(SignalSample(makeSignalKey(sourceKey, 0), sourceKey, prefix + QStringLiteral(" Mask"), t, u8(d, 0), QStringLiteral("raw")));
-        addSample(SignalSample(makeSignalKey(sourceKey, 1), sourceKey, prefix + QStringLiteral(" Bitmap"), t, u8(d, 1), QStringLiteral("raw")));
-        return;
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalKnownBase + 0), sourceKey,
+                               prefix + QStringLiteral(" Mask"), t, u8(d, 0), QStringLiteral("raw")));
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalKnownBase + 1), sourceKey,
+                               prefix + QStringLiteral(" Bitmap"), t, u8(d, 1), QStringLiteral("raw")));
+        producedKnownSignal = true;
     }
 
     // Enable/mode output family: useful for mode-change traces.
     if (frame.extended && (id & 0xFFFFF000u) == kEnableMotorOutputBase && d.size() >= 1) {
-        addSample(SignalSample(makeSignalKey(sourceKey, 0), sourceKey, prefix, t, u8(d, 0), QStringLiteral("raw")));
-        return;
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalKnownBase + 0), sourceKey,
+                               prefix + QStringLiteral(" Mode"), t, u8(d, 0), QStringLiteral("raw")));
+        producedKnownSignal = true;
+    }
+
+    // Fallback: for every selected R-Net message that has no specific signal
+    // mapping yet, plot each payload byte. This is essential for reverse
+    // engineering because selected/unknown R-Net frames must still become visible.
+    if (!producedKnownSignal)
+        addPayloadByteSamples(sourceKey, prefix, frame);
+}
+
+void SignalHistoryModel::addFrameCounterSample(quint64 sourceKey, const QString &sourceName, const CanFrame &frame)
+{
+    const double t = frameTimeSec(frame);
+    const quint64 count = ++m_sourceCounts[sourceKey];
+    addSample(SignalSample(makeSignalKey(sourceKey, kSignalFrameCount), sourceKey,
+                           sourceName + QStringLiteral(" Count"), t,
+                           static_cast<double>(count), QStringLiteral("frames")));
+}
+
+void SignalHistoryModel::addPayloadByteSamples(quint64 sourceKey, const QString &sourceName, const CanFrame &frame)
+{
+    const double t = frameTimeSec(frame);
+    for (int i = 0; i < frame.data.size() && i < 8; ++i) {
+        addSample(SignalSample(makeSignalKey(sourceKey, kSignalPayloadBase + quint16(i)), sourceKey,
+                               sourceName + QStringLiteral(" Byte %1").arg(i), t,
+                               u8(frame.data, i), QStringLiteral("raw")));
     }
 }
 
 void SignalHistoryModel::removeSource(quint64 sourceKey)
 {
     QList<quint64> removeKeys;
+
     for (auto it = m_signals.constBegin(); it != m_signals.constEnd(); ++it) {
         if (it.value().sourceKey == sourceKey)
             removeKeys.push_back(it.key());
@@ -121,6 +178,8 @@ void SignalHistoryModel::removeSource(quint64 sourceKey)
     for (const quint64 key : removeKeys)
         m_signals.remove(key);
 
+    m_sourceNames.remove(sourceKey);
+    m_sourceCounts.remove(sourceKey);
     recomputeTimeRange();
 }
 
@@ -129,6 +188,7 @@ bool SignalHistoryModel::setSignalEnabled(quint64 key, bool enabled)
     auto it = m_signals.find(key);
     if (it == m_signals.end())
         return false;
+
     it->enabled = enabled;
     return true;
 }
@@ -143,6 +203,7 @@ quint8 SignalHistoryModel::u8(const QByteArray &data, int index)
 {
     if (index < 0 || index >= data.size())
         return 0;
+
     return static_cast<quint8>(data.at(index));
 }
 
@@ -153,7 +214,8 @@ qint8 SignalHistoryModel::s8(const QByteArray &data, int index)
 
 quint16 SignalHistoryModel::le16(const QByteArray &data, int index)
 {
-    return quint16(u8(data, index)) | (quint16(u8(data, index + 1)) << 8);
+    return quint16(u8(data, index)) |
+           (quint16(u8(data, index + 1)) << 8);
 }
 
 quint32 SignalHistoryModel::le32(const QByteArray &data, int index)
@@ -169,9 +231,9 @@ double SignalHistoryModel::frameTimeSec(const CanFrame &frame)
     return double(frame.hwTimestamp) / 1000.0;
 }
 
-quint64 SignalHistoryModel::makeSignalKey(quint64 sourceKey, quint8 parameterIndex)
+quint64 SignalHistoryModel::makeSignalKey(quint64 sourceKey, quint16 parameterIndex)
 {
-    return (sourceKey << 8) | quint64(parameterIndex);
+    return (sourceKey << 16) | quint64(parameterIndex);
 }
 
 void SignalHistoryModel::recomputeTimeRange()

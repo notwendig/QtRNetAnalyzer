@@ -3,8 +3,9 @@
 #include "canframe.h"
 #include "signalsample.h"
 
+#include <QByteArray>
 #include <QHash>
-#include <QSet>
+#include <QString>
 #include <QVector>
 
 struct SignalHistory
@@ -21,6 +22,7 @@ class SignalHistoryModel
 {
 public:
     void clear();
+
     void addSample(const SignalSample &sample);
     void addSamplesFromFrame(quint64 sourceKey, const QString &sourceName, const CanFrame &frame);
     void removeSource(quint64 sourceKey);
@@ -41,13 +43,19 @@ private:
     static quint16 le16(const QByteArray &data, int index);
     static quint32 le32(const QByteArray &data, int index);
     static double frameTimeSec(const CanFrame &frame);
-    static quint64 makeSignalKey(quint64 sourceKey, quint8 parameterIndex);
+    static quint64 makeSignalKey(quint64 sourceKey, quint16 parameterIndex);
+
+    void addFrameCounterSample(quint64 sourceKey, const QString &sourceName, const CanFrame &frame);
+    void addPayloadByteSamples(quint64 sourceKey, const QString &sourceName, const CanFrame &frame);
     void recomputeTimeRange();
+
     static constexpr int kMaxSamplesPerSignal = 20000;
 
 private:
     QHash<quint64, SignalHistory> m_signals;
     QHash<quint64, QString> m_sourceNames;
+    QHash<quint64, quint64> m_sourceCounts;
+
     double m_minTime = 0.0;
     double m_maxTime = 0.0;
     bool m_hasTime = false;
