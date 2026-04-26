@@ -32,7 +32,7 @@ Decoded R-Net frames with type grouping, counters and parameter extraction.
 Interactive live visualization of tagged R-Net messages.  
 Tracks payload evolution over time with full history support.
 
-<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-57-49.png" width="900">
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-26 05-42-50.png" width="900">
 
 ---
 ## Build
