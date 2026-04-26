@@ -226,7 +226,8 @@ void ControlCanDeviceWorker::processPendingTx()
         obj.SendType = 1;
         obj.RemoteFlag = tx.remote ? 1 : 0;
         obj.ExternFlag = tx.extended ? 1 : 0;
-        obj.DataLen = static_cast<BYTE>(std::min(8, tx.data.size()));
+        const qsizetype dataLen = std::min<qsizetype>(8, tx.data.size());
+        obj.DataLen = static_cast<BYTE>(dataLen);
         for (int i = 0; i < obj.DataLen; ++i)
             obj.Data[i] = static_cast<BYTE>(tx.data.at(i));
 
