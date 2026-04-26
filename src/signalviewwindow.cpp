@@ -194,9 +194,17 @@ void SignalViewWindow::rebuildSignalTree()
             auto *signalItem = new QTreeWidgetItem(sourceItem);
 
             QString signalName = history.name;
+
             const int slash = signalName.lastIndexOf('/');
             if (slash >= 0)
                 signalName = signalName.mid(slash + 1).trimmed();
+
+            const QString sourceName = sourceNames.value(sourceKey);
+            if (!sourceName.isEmpty() && signalName.startsWith(sourceName))
+                signalName = signalName.mid(sourceName.length()).trimmed();
+
+            if (signalName.isEmpty())
+                signalName = history.name;
 
             signalItem->setText(0, signalName);
             signalItem->setText(1, QStringLiteral("■"));
