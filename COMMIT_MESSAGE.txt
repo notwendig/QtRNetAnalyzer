@@ -1,1 +1,1 @@
-Repair CMake target and make ControlCAN optional
+Fix one-shot simulation replay after repeat mode

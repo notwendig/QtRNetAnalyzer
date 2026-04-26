@@ -846,6 +846,15 @@ void MainWindow::startSimulationOnce()
     if (m_simulationFrames.isEmpty())
         return;
 
+    // A one-shot replay must never inherit a previous repeat run.
+    // Stop any active/queued replay timer before changing mode.
+    if (m_simulationTimer)
+        m_simulationTimer->stop();
+
+    m_simulationRepeat = false;
+    m_simulationRunning = false;
+    m_simulationIndex = 0;
+
     clearTables();
 
     m_simulationRepeat = false;
@@ -861,6 +870,13 @@ void MainWindow::startSimulationRepeat()
 {
     if (m_simulationFrames.isEmpty())
         return;
+
+    if (m_simulationTimer)
+        m_simulationTimer->stop();
+
+    m_simulationRepeat = false;
+    m_simulationRunning = false;
+    m_simulationIndex = 0;
 
     clearTables();
 
@@ -882,6 +898,7 @@ void MainWindow::stopSimulation()
         onStatusMessage(QStringLiteral("Simulation stopped"), false);
 
     m_simulationRunning = false;
+    m_simulationRepeat = false;
     updateSimulationActions();
 }
 
