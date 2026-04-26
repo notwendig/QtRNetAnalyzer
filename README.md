@@ -1,60 +1,93 @@
 # QtRNetAnalyzer
 
-Qt6 desktop analyzer for CAN and R-Net traffic with live tables, R-Net decoding,
-tagging, live signal plots, and manual simulation replay from candump/lua text files.
+Qt6 desktop analyzer for CAN and R-Net traffic with live tables, R-Net decoding, tagging, and live signal plotting.
 
-## Build modes
+## Features
 
-### Simulation-only build
+- Live CAN table with sorting
+- Decoded R-Net table with aggregation by type key
+- Taggable R-Net messages
+- Live plot window for tagged frames including accumulated history
+- Simulator mode for development without hardware
+- Optional proprietary ControlCAN integration
 
-The project always builds without the proprietary ControlCAN SDK. In this mode,
-hardware capture is disabled, but the simulation menu can replay `candump.txt` or
-Lua/text files containing CAN frame tokens.
+## Screenshots
+
+### Live Table
+Real-time CAN frame capture with timestamp, ID, DLC and raw payload view.  
+Optimized for high bus load and continuous monitoring.
+
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-50-01.png" width="900">
+
+---
+
+### R-Net Decoder Table
+Decoded R-Net frames with type grouping, counters and parameter extraction.
+
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-58-44.png" width="900">
+
+---
+
+### R-Net Signal Plot
+Interactive live visualization of tagged R-Net messages.  
+Tracks payload evolution over time with full history support.
+
+<img src="doc/pictures/Bildschirmfoto vom 2026-04-26 05-42-50.png" width="900">
+
+---
+## Build
+
+### Simulator-only build
 
 ```bash
-cmake -S . -B build/Desktop-Debug
-cmake --build build/Desktop-Debug
+mkdir -p build
+cd build
+cmake ..
+cmake --build .
+./QtRNetAnalyzer --input <candump.txt>
+<<<<<<< HEAD
 ```
 
-### Full ControlCAN hardware build
+### Build with proprietary ControlCAN SDK
 
-The full hardware version is enabled automatically only when both files exist:
+Place the vendor SDK header and shared library in `third_party/` and configure with:
 
-```text
-third_party/controlcan/controlcan.h
-third_party/controlcan/libcontrolcan.so
+```bash
+mkdir -p build
+cd build
+cmake -DENABLE_CONTROLCAN=ON ..
+cmake --build .
+./QtRNetAnalyzer
 ```
 
-Alternative accepted paths/names:
+Expected library path:
 
-```text
-third_party/ControlCAN/controlcan.h
-third_party/ControlCAN/libControlCAN.so
-third_party/controlcan.h
-third_party/libcontrolcan.so
-```
+- `third_party/x86/64-linux/libcontrolcan.so`
 
-If only `controlcan.h` exists but the library is missing, the build intentionally
-falls back to simulation-only mode to avoid linker errors such as undefined
-references to `VCI_OpenDevice`, `VCI_InitCAN`, `VCI_Receive`, or `VCI_Transmit`.
+## Repository layout
 
-## Simulation menu
+- `*.cpp`, `*.h` — application source code, licensed under GPL-3.0-only
+- `README.md` and other documentation — licensed under CC BY-NC-SA 4.0
+- `third_party/` — not included; vendor SDK files belong to their respective owners
 
-```text
-Simulation
- ├── Select source...
- ├── Start once
- ├── Start repeat
- └── Stop
-```
+## Licensing
 
-No simulation starts automatically. Select a source first, then start once or
-repeat manually.
+### Code
 
-## Current branch policy
+This project's source code is licensed under the GNU General Public License v3.0 only. See `LICENSE`.
 
-All generated fixes are based on:
+### Documentation and analysis text
 
-```text
-https://github.com/notwendig/QtRNetAnalyzer/tree/chatgpt
-```
+Documentation, protocol notes, and explanatory text in this repository are licensed under
+Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International. See `LICENSE.docs`.
+
+## Authors
+
+- ChatGPT (GPT-5.4 Thinking)
+- Jürgen Willi Sievers <JSievers@NadiSoft.de>
+
+## Note about proprietary SDK files
+
+The optional ControlCAN integration depends on vendor-provided proprietary files that are **not** part of this repository.
+You must obtain those files yourself and place them locally under `third_party/`.
+

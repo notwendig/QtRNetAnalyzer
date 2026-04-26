@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.21)
 
 project(QtRNetAnalyzer LANGUAGES CXX)
 
@@ -9,9 +9,10 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+
 qt_standard_project_setup()
 
-qt_add_executable(QtRNetAnalyzer
+set(QTRNET_SOURCES
     src/main.cpp
     src/mainwindow.cpp
     src/mainwindow.h
@@ -42,42 +43,85 @@ qt_add_executable(QtRNetAnalyzer
     src/signalviewwindow.h
 )
 
-target_include_directories(QtRNetAnalyzer PRIVATE src)
-target_link_libraries(QtRNetAnalyzer PRIVATE Qt6::Core Qt6::Widgets)
-
-# Optional proprietary ControlCAN SDK support.
-# Full hardware build is enabled only when BOTH the vendor header and library
-# are present. If only controlcan.h exists, the app still builds in
-# simulation/candump replay mode instead of failing at link time.
-set(QTRA_CONTROLCAN_INCLUDE_DIR "")
-set(QTRA_CONTROLCAN_LIBRARY "")
-
-set(QTRA_CONTROLCAN_SEARCH_DIRS
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/controlcan"
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ControlCAN"
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
+qt_add_executable(QtRNetAnalyzer
+    ${QTRNET_SOURCES}
 )
 
-foreach(_dir IN LISTS QTRA_CONTROLCAN_SEARCH_DIRS)
-    if(EXISTS "${_dir}/controlcan.h" AND NOT QTRA_CONTROLCAN_INCLUDE_DIR)
-        set(QTRA_CONTROLCAN_INCLUDE_DIR "${_dir}")
+target_include_directories(QtRNetAnalyzer
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(QtRNetAnalyzer
+    PRIVATE
+        Qt6::Core
+        Qt6::Widgets
+)
+
+#
+# Optional/full ControlCAN SDK handling
+#
+# Policy:
+#   - If third_party/controlcan.h exists, build the full hardware version.
+#   - For the full version the matching vendor library is required.
+#   - Expected repository layout:
+#
+#       third_party/controlcan.h
+#       third_party/x86/64-linux/libcontrolcan.so
+#       third_party/x86/32-linux/libcontrolcan.so
+#
+set(CONTROLCAN_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/third_party/controlcan.h")
+
+if(EXISTS "${CONTROLCAN_HEADER}")
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(CONTROLCAN_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/x86/64-linux")
+    else()
+        set(CONTROLCAN_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/x86/32-linux")
     endif()
-endforeach()
 
-find_library(QTRA_CONTROLCAN_LIBRARY
-    NAMES controlcan ControlCAN libcontrolcan libControlCAN
-    PATHS ${QTRA_CONTROLCAN_SEARCH_DIRS}
-    NO_DEFAULT_PATH
-)
+    find_library(CONTROLCAN_LIBRARY
+        NAMES controlcan libcontrolcan
+        PATHS "${CONTROLCAN_LIB_DIR}"
+        NO_DEFAULT_PATH
+    )
 
-if(QTRA_CONTROLCAN_INCLUDE_DIR AND QTRA_CONTROLCAN_LIBRARY)
-    message(STATUS "ControlCAN enabled: ${QTRA_CONTROLCAN_LIBRARY}")
-    target_compile_definitions(QtRNetAnalyzer PRIVATE QTRA_HAS_CONTROLCAN=1)
-    target_include_directories(QtRNetAnalyzer PRIVATE "${QTRA_CONTROLCAN_INCLUDE_DIR}")
-    target_link_libraries(QtRNetAnalyzer PRIVATE "${QTRA_CONTROLCAN_LIBRARY}")
+    if(NOT CONTROLCAN_LIBRARY)
+        message(FATAL_ERROR
+            "third_party/controlcan.h exists, therefore QtRNetAnalyzer must be built "
+            "as the full ControlCAN version, but no matching libcontrolcan library "
+            "was found in: ${CONTROLCAN_LIB_DIR}"
+        )
+    endif()
+
+    target_include_directories(QtRNetAnalyzer
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+    )
+
+    target_link_libraries(QtRNetAnalyzer
+        PRIVATE
+            ${CONTROLCAN_LIBRARY}
+    )
+
+    target_compile_definitions(QtRNetAnalyzer
+        PRIVATE
+            QTRNETANALYZER_WITH_CONTROLCAN=1
+    )
+
+    set_target_properties(QtRNetAnalyzer PROPERTIES
+        BUILD_RPATH "${CONTROLCAN_LIB_DIR}"
+        INSTALL_RPATH "$ORIGIN;${CONTROLCAN_LIB_DIR}"
+    )
+
+    message(STATUS "ControlCAN full hardware build enabled")
+    message(STATUS "ControlCAN header: ${CONTROLCAN_HEADER}")
+    message(STATUS "ControlCAN library: ${CONTROLCAN_LIBRARY}")
 else()
-    message(STATUS "ControlCAN disabled: vendor header and library were not both found")
-    target_compile_definitions(QtRNetAnalyzer PRIVATE QTRA_HAS_CONTROLCAN=0)
+    message(WARNING
+        "third_party/controlcan.h not found. This source tree currently expects "
+        "the ControlCAN SDK for hardware capture. Simulation replay still works "
+        "only if the source code is built with a compatible SDK/stub setup."
+    )
 endif()
 
 install(TARGETS QtRNetAnalyzer
