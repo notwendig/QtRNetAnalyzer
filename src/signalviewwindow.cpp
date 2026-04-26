@@ -5,17 +5,18 @@
 #include <QLabel>
 #include <QMap>
 #include <QPushButton>
-#include <QSignalBlocker>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
-#include <QVariant>
 #include <QVBoxLayout>
+
 #include <algorithm>
 
-namespace {
+namespace
+{
 constexpr int kItemKindRole = Qt::UserRole + 1;
 constexpr int kSignalKeyRole = Qt::UserRole + 2;
 constexpr int kSourceKeyRole = Qt::UserRole + 3;
+
 constexpr int kKindSource = 1;
 constexpr int kKindSignal = 2;
 }
@@ -32,12 +33,19 @@ SignalViewWindow::SignalViewWindow(QWidget *parent)
     m_signalTree = new QTreeWidget(this);
     m_signalTree->setMinimumWidth(340);
     m_signalTree->setColumnCount(3);
-    m_signalTree->setHeaderLabels({QStringLiteral("Signal"), QStringLiteral("Color"), QStringLiteral("Unit")});
+    m_signalTree->setHeaderLabels({
+        QStringLiteral("Signal"),
+        QStringLiteral("Color"),
+        QStringLiteral("Unit")
+    });
     m_signalTree->setRootIsDecorated(true);
     m_signalTree->setAlternatingRowColors(true);
 
     m_resetZoom = new QPushButton(QStringLiteral("Reset Zoom"), this);
-    m_status = new QLabel(QStringLiteral("Check rows in the R-Net table. Each checked R-Net frame appears here with its signal channels."), this);
+
+    m_status = new QLabel(
+        QStringLiteral("Check at least one R-Net row in the R-Net table to enable Signal View selection."),
+        this);
     m_status->setWordWrap(true);
 
     side->addWidget(title);
@@ -47,31 +55,41 @@ SignalViewWindow::SignalViewWindow(QWidget *parent)
 
     m_plot = new SignalPlotWidget(this);
     m_plot->setModel(&m_history);
-    m_signalTree->setEnabled(false);
-    m_resetZoom->setEnabled(false);
-    m_plot->setEnabled(false);
 
     root->addLayout(side);
     root->addWidget(m_plot, 1);
 
-    connect(m_signalTree, &QTreeWidget::itemChanged, this, &SignalViewWindow::onSignalItemChanged);
-    connect(m_resetZoom, &QPushButton::clicked, m_plot, &SignalPlotWidget::resetZoom);
-    connect(m_plot, &SignalPlotWidget::pauseChanged, this, &SignalViewWindow::onPauseChanged);
+    setInputEnabled(false);
+
+    connect(m_signalTree, &QTreeWidget::itemChanged,
+            this, &SignalViewWindow::onSignalItemChanged);
+    connect(m_resetZoom, &QPushButton::clicked,
+            m_plot, &SignalPlotWidget::resetZoom);
+    connect(m_plot, &SignalPlotWidget::pauseChanged,
+            this, &SignalViewWindow::onPauseChanged);
 }
 
 void SignalViewWindow::setInputEnabled(bool enabled)
 {
     m_inputEnabled = enabled;
-    m_signalTree->setEnabled(enabled);
-    m_resetZoom->setEnabled(enabled);
-    m_plot->setEnabled(enabled);
 
-    if (!enabled) {
-        m_status->setText(QStringLiteral("Check at least one R-Net row in the R-Net table to enable Signal View selection."));
+    if (m_signalTree)
+        m_signalTree->setEnabled(enabled);
+    if (m_resetZoom)
+        m_resetZoom->setEnabled(enabled);
+    if (m_plot)
+        m_plot->setEnabled(enabled);
+
+    if (!m_status)
         return;
-    }
 
-    m_status->setText(QStringLiteral("Live mode. Only checked signal channels from checked R-Net rows are plotted."));
+    if (enabled) {
+        m_status->setText(QStringLiteral(
+            "Live mode.\nOnly checked signal channels from checked R-Net rows are plotted."));
+    } else {
+        m_status->setText(QStringLiteral(
+            "Check at least one R-Net row in the R-Net table to enable Signal View selection."));
+    }
 }
 
 void SignalViewWindow::addFrame(quint64 sourceKey, const QString &sourceName, const CanFrame &frame)
@@ -83,30 +101,40 @@ void SignalViewWindow::addFrame(quint64 sourceKey, const QString &sourceName, co
     if (after != before)
         rebuildSignalTree();
 
-    m_plot->refreshView();
+    if (m_plot)
+        m_plot->refreshView();
 }
 
 void SignalViewWindow::removeSource(quint64 sourceKey)
 {
     m_history.removeSource(sourceKey);
     rebuildSignalTree();
-    m_plot->refreshView();
+
+    if (m_plot)
+        m_plot->refreshView();
 }
 
 void SignalViewWindow::clear()
 {
     m_history.clear();
-    m_signalTree->clear();
-    m_plot->resetZoom();
-    m_plot->refreshView();
+
+    if (m_signalTree)
+        m_signalTree->clear();
+
+    if (m_plot) {
+        m_plot->resetZoom();
+        m_plot->refreshView();
+    }
+
     setInputEnabled(false);
-    m_status->setText(QStringLiteral("Signal history cleared. Check at least one R-Net row to enable Signal View selection."));
 }
 
 void SignalViewWindow::refreshSignals()
 {
     rebuildSignalTree();
-    m_plot->refreshView();
+
+    if (m_plot)
+        m_plot->refreshView();
 }
 
 void SignalViewWindow::onSignalItemChanged(QTreeWidgetItem *item, int column)
@@ -117,19 +145,14 @@ void SignalViewWindow::onSignalItemChanged(QTreeWidgetItem *item, int column)
         return;
 
     m_updatingTree = true;
-    const QSignalBlocker blocker(m_signalTree);
 
     if (isSourceItem(item)) {
-        // PartiallyChecked is display-only. Do not treat it as unchecked,
-        // otherwise disabling one child signal disables the whole R-Net group.
-        const Qt::CheckState state = item->checkState(0);
-        if (state == Qt::Checked || state == Qt::Unchecked) {
-            const bool enabled = state == Qt::Checked;
-            for (int i = 0; i < item->childCount(); ++i) {
-                QTreeWidgetItem *child = item->child(i);
-                child->setCheckState(0, enabled ? Qt::Checked : Qt::Unchecked);
-                m_history.setSignalEnabled(itemKey(child), enabled);
-            }
+        const bool enabled = item->checkState(0) == Qt::Checked;
+
+        for (int i = 0; i < item->childCount(); ++i) {
+            QTreeWidgetItem *child = item->child(i);
+            child->setCheckState(0, enabled ? Qt::Checked : Qt::Unchecked);
+            m_history.setSignalEnabled(itemKey(child), enabled);
         }
     } else if (isSignalItem(item)) {
         m_history.setSignalEnabled(itemKey(item), item->checkState(0) == Qt::Checked);
@@ -137,27 +160,40 @@ void SignalViewWindow::onSignalItemChanged(QTreeWidgetItem *item, int column)
         QTreeWidgetItem *parent = item->parent();
         if (parent) {
             int checked = 0;
-            for (int i = 0; i < parent->childCount(); ++i)
-                checked += parent->child(i)->checkState(0) == Qt::Checked ? 1 : 0;
+            for (int i = 0; i < parent->childCount(); ++i) {
+                if (parent->child(i)->checkState(0) == Qt::Checked)
+                    ++checked;
+            }
 
-            const Qt::CheckState parentState = checked == 0
-                                                 ? Qt::Unchecked
-                                                 : (checked == parent->childCount() ? Qt::Checked : Qt::PartiallyChecked);
-            parent->setCheckState(0, parentState);
+            parent->setCheckState(
+                0,
+                checked == 0
+                    ? Qt::Unchecked
+                    : (checked == parent->childCount() ? Qt::Checked : Qt::PartiallyChecked));
         }
     }
 
     m_updatingTree = false;
-    m_plot->refreshView();
+
+    if (m_plot)
+        m_plot->refreshView();
 }
+
+void SignalViewWindow::onPauseChanged(bool paused)
 {
+    if (!m_status)
+        return;
+
     m_status->setText(paused
-                          ? QStringLiteral("Paused. Ctrl+drag inside the plot to zoom, right click resets zoom.")
-                          : QStringLiteral("Live mode. Only checked signal channels from checked R-Net rows are plotted."));
+        ? QStringLiteral("Paused.\nDrag inside the plot to zoom, right click resets zoom.")
+        : QStringLiteral("Live mode.\nOnly checked signal channels from checked R-Net rows are plotted."));
 }
 
 void SignalViewWindow::rebuildSignalTree()
 {
+    if (!m_signalTree)
+        return;
+
     m_updatingTree = true;
     m_signalTree->clear();
 
@@ -166,17 +202,21 @@ void SignalViewWindow::rebuildSignalTree()
 
     for (auto it = m_history.allSignals().constBegin(); it != m_history.allSignals().constEnd(); ++it) {
         groups[it.value().sourceKey].append(it.key());
-        sourceNames.insert(it.value().sourceKey,
-                           it.value().sourceName.isEmpty() ? QStringLiteral("R-Net") : it.value().sourceName);
+        sourceNames.insert(
+            it.value().sourceKey,
+            it.value().sourceName.isEmpty() ? QStringLiteral("R-Net") : it.value().sourceName);
     }
 
     for (auto groupIt = groups.constBegin(); groupIt != groups.constEnd(); ++groupIt) {
         const quint64 sourceKey = groupIt.key();
+
         auto *sourceItem = new QTreeWidgetItem(m_signalTree);
         sourceItem->setText(0, sourceNames.value(sourceKey));
         sourceItem->setData(0, kItemKindRole, kKindSource);
-        sourceItem->setData(0, kSourceKeyRole, QVariant::fromValue<qulonglong>(sourceKey));
-        sourceItem->setFlags((sourceItem->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsAutoTristate);
+        sourceItem->setData(0, kSourceKeyRole, QVariant::fromValue(sourceKey));
+        sourceItem->setFlags(sourceItem->flags()
+                             | Qt::ItemIsUserCheckable
+                             | Qt::ItemIsAutoTristate);
         sourceItem->setExpanded(true);
 
         int enabledChildren = 0;
@@ -184,7 +224,8 @@ void SignalViewWindow::rebuildSignalTree()
         std::sort(signalKeys.begin(), signalKeys.end());
 
         for (const quint64 signalKey : signalKeys) {
-            const SignalHistory &history = m_history.allSignals().value(signalKey);
+            const SignalHistory history = m_history.allSignals().value(signalKey);
+
             auto *signalItem = new QTreeWidgetItem(sourceItem);
             signalItem->setText(0, history.name);
             signalItem->setText(1, QStringLiteral("■"));
@@ -193,16 +234,22 @@ void SignalViewWindow::rebuildSignalTree()
             signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
             signalItem->setCheckState(0, history.enabled ? Qt::Checked : Qt::Unchecked);
             signalItem->setData(0, kItemKindRole, kKindSignal);
-            signalItem->setData(0, kSignalKeyRole, QVariant::fromValue<qulonglong>(signalKey));
+            signalItem->setData(0, kSignalKeyRole, QVariant::fromValue(signalKey));
+
             if (history.enabled)
                 ++enabledChildren;
         }
 
-        sourceItem->setCheckState(0, enabledChildren == 0 ? Qt::Unchecked : (enabledChildren == signalKeys.size() ? Qt::Checked : Qt::PartiallyChecked));
+        sourceItem->setCheckState(
+            0,
+            enabledChildren == 0
+                ? Qt::Unchecked
+                : (enabledChildren == signalKeys.size() ? Qt::Checked : Qt::PartiallyChecked));
     }
 
     m_signalTree->resizeColumnToContents(0);
     m_signalTree->resizeColumnToContents(1);
+
     m_updatingTree = false;
 }
 
