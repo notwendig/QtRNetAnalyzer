@@ -98,8 +98,14 @@ void SignalPlotWidget::mouseMoveEvent(QMouseEvent *event)
         m_selectionEnd = event->pos();
 
     const QRect plot = plotRect();
-    if (plot.contains(m_mousePos) && m_model && m_model->hasSamples())
-        QToolTip::showText(event->globalPosition().toPoint(), cursorText(xToTime(m_mousePos.x())), this);
+    if (plot.contains(m_mousePos) && m_model && m_model->hasSamples()) {
+        const double timeSec = xToTime(m_mousePos.x());
+        QToolTip::showText(event->globalPosition().toPoint(), cursorText(timeSec), this);
+        emit cursorTimeChanged(timeSec, true);
+    } else {
+        QToolTip::hideText();
+        emit cursorTimeChanged(0.0, false);
+    }
 
     update();
 }
@@ -134,6 +140,7 @@ void SignalPlotWidget::leaveEvent(QEvent *event)
     QWidget::leaveEvent(event);
     m_mouseInside = false;
     QToolTip::hideText();
+    emit cursorTimeChanged(0.0, false);
     update();
 }
 
@@ -372,33 +379,5 @@ void SignalPlotWidget::drawLegend(QPainter &painter, const QRect &plot) const
 
 QString SignalPlotWidget::cursorText(double timeSec) const
 {
-    if (!m_model)
-        return {};
-
-    QStringList lines;
-    lines << QStringLiteral("t = %1 s").arg(timeSec, 0, 'f', 3);
-
-    for (auto it = m_model->allSignals().constBegin(); it != m_model->allSignals().constEnd(); ++it) {
-        const SignalHistory &history = it.value();
-        if (!history.enabled || history.samples.isEmpty())
-            continue;
-
-        const SignalSample *best = nullptr;
-        double bestDistance = std::numeric_limits<double>::max();
-
-        for (const SignalSample &sample : history.samples) {
-            const double distance = qAbs(sample.timeSec - timeSec);
-            if (distance < bestDistance) {
-                best = &sample;
-                bestDistance = distance;
-            }
-        }
-
-        if (best) {
-            const QString unit = best->unit.isEmpty() ? QString() : QStringLiteral(" %1").arg(best->unit);
-            lines << QStringLiteral("%1: %2%3").arg(history.name).arg(best->value, 0, 'g', 6).arg(unit);
-        }
-    }
-
-    return lines.join(QLatin1Char('\n'));
+    return QStringLiteral("t = %1 s").arg(timeSec, 0, 'f', 3);
 }

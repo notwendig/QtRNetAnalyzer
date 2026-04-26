@@ -3,6 +3,7 @@
 #include "signalhistorymodel.h"
 #include "signalplotwidget.h"
 
+#include <QString>
 #include <QWidget>
 
 class QLabel;
@@ -31,9 +32,12 @@ public slots:
 private slots:
     void onSignalItemChanged(QTreeWidgetItem *item, int column);
     void onPauseChanged(bool paused);
+    void onCursorTimeChanged(double timeSec, bool active);
 
 private:
     void rebuildSignalTree();
+    void updateTreeValuesAt(double timeSec, bool active);
+    QString valueTextAt(quint64 signalKey, double timeSec) const;
     static quint64 itemKey(const QTreeWidgetItem *item);
     static bool isSignalItem(const QTreeWidgetItem *item);
     static bool isSourceItem(const QTreeWidgetItem *item);

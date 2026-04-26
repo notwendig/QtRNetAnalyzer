@@ -4,6 +4,7 @@
 
 #include <QColor>
 #include <QPoint>
+#include <QString>
 #include <QWidget>
 
 class SignalPlotWidget final : public QWidget
@@ -25,6 +26,7 @@ public slots:
 signals:
     void pauseChanged(bool paused);
     void selectionZoomed(double startSec, double endSec);
+    void cursorTimeChanged(double timeSec, bool active);
 
 protected:
     void paintEvent(QPaintEvent *event) override;

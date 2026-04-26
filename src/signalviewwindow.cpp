@@ -10,6 +10,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <limits>
 
 namespace {
 constexpr int kItemKindRole = Qt::UserRole + 1;
@@ -30,8 +31,8 @@ SignalViewWindow::SignalViewWindow(QWidget *parent)
 
     m_signalTree = new QTreeWidget(this);
     m_signalTree->setMinimumWidth(340);
-    m_signalTree->setColumnCount(3);
-    m_signalTree->setHeaderLabels({QStringLiteral("Signal"), QStringLiteral("Color"), QStringLiteral("Unit")});
+    m_signalTree->setColumnCount(4);
+    m_signalTree->setHeaderLabels({QStringLiteral("Signal"), QStringLiteral("Color"), QStringLiteral("Value"), QStringLiteral("Unit")});
     m_signalTree->setRootIsDecorated(true);
     m_signalTree->setAlternatingRowColors(true);
 
@@ -59,6 +60,7 @@ SignalViewWindow::SignalViewWindow(QWidget *parent)
     connect(m_signalTree, &QTreeWidget::itemChanged, this, &SignalViewWindow::onSignalItemChanged);
     connect(m_resetZoom, &QPushButton::clicked, m_plot, &SignalPlotWidget::resetZoom);
     connect(m_plot, &SignalPlotWidget::pauseChanged, this, &SignalViewWindow::onPauseChanged);
+    connect(m_plot, &SignalPlotWidget::cursorTimeChanged, this, &SignalViewWindow::onCursorTimeChanged);
 }
 
 void SignalViewWindow::setInputEnabled(bool enabled)
@@ -193,7 +195,8 @@ void SignalViewWindow::rebuildSignalTree()
             signalItem->setText(0, history.name);
             signalItem->setText(1, QStringLiteral("■"));
             signalItem->setForeground(1, QBrush(SignalPlotWidget::colorForSignalKey(signalKey)));
-            signalItem->setText(2, history.unit);
+            signalItem->setText(2, QStringLiteral("—"));
+            signalItem->setText(3, history.unit);
             signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
             signalItem->setCheckState(0, history.enabled ? Qt::Checked : Qt::Unchecked);
             signalItem->setData(0, kItemKindRole, kKindSignal);
@@ -210,7 +213,56 @@ void SignalViewWindow::rebuildSignalTree()
 
     m_signalTree->resizeColumnToContents(0);
     m_signalTree->resizeColumnToContents(1);
+    m_signalTree->resizeColumnToContents(2);
+    m_signalTree->resizeColumnToContents(3);
     m_updatingTree = false;
+}
+
+void SignalViewWindow::onCursorTimeChanged(double timeSec, bool active)
+{
+    updateTreeValuesAt(timeSec, active);
+}
+
+void SignalViewWindow::updateTreeValuesAt(double timeSec, bool active)
+{
+    for (int i = 0; i < m_signalTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *sourceItem = m_signalTree->topLevelItem(i);
+        if (!sourceItem)
+            continue;
+
+        for (int j = 0; j < sourceItem->childCount(); ++j) {
+            QTreeWidgetItem *signalItem = sourceItem->child(j);
+            if (!signalItem)
+                continue;
+
+            signalItem->setText(2, active ? valueTextAt(itemKey(signalItem), timeSec) : QStringLiteral("—"));
+        }
+    }
+
+    m_signalTree->resizeColumnToContents(2);
+}
+
+QString SignalViewWindow::valueTextAt(quint64 signalKey, double timeSec) const
+{
+    const auto it = m_history.allSignals().constFind(signalKey);
+    if (it == m_history.allSignals().constEnd() || it->samples.isEmpty())
+        return QStringLiteral("—");
+
+    const SignalSample *best = nullptr;
+    double bestDistance = std::numeric_limits<double>::max();
+
+    for (const SignalSample &sample : it->samples) {
+        const double distance = qAbs(sample.timeSec - timeSec);
+        if (distance < bestDistance) {
+            best = &sample;
+            bestDistance = distance;
+        }
+    }
+
+    if (!best)
+        return QStringLiteral("—");
+
+    return QString::number(best->value, 'g', 6);
 }
 
 quint64 SignalViewWindow::itemKey(const QTreeWidgetItem *item)
