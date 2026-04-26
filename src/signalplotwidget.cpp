@@ -276,6 +276,68 @@ void SignalPlotWidget::drawSignals(QPainter &painter, const QRect &plot) const
         const QColor color = colorForSignalKey(it.key());
         painter.setPen(QPen(color, 1.7));
 
+        QVector<int> visibleIndexes;
+        visibleIndexes.reserve(qMin(history.samples.size(), 4096));
+        for (int i = 0; i < history.samples.size(); ++i) {
+            const SignalSample &sample = history.samples.at(i);
+            if (sample.timeSec >= m_viewStart && sample.timeSec <= m_viewEnd)
+                visibleIndexes.push_back(i);
+        }
+
+        if (visibleIndexes.isEmpty())
+            continue;
+
+        QPainterPath path;
+        bool started = false;
+        int pointsDrawn = 0;
+        const int maxPoints = qMax(2000, width() * 3);
+        const int stride = qMax(1, visibleIndexes.size() / maxPoints);
+
+        for (int visibleIndex = 0; visibleIndex < visibleIndexes.size(); visibleIndex += stride) {
+            const SignalSample &sample = history.samples.at(visibleIndexes.at(visibleIndex));
+            const QPointF point(timeToX(sample.timeSec), valueToY(sample.value, minValue, maxValue));
+            if (!started) {
+                path.moveTo(point);
+                started = true;
+            } else {
+                path.lineTo(point);
+            }
+            ++pointsDrawn;
+        }
+
+        if (pointsDrawn > 1) {
+            painter.drawPath(path);
+        } else if (pointsDrawn == 1) {
+            const SignalSample &sample = history.samples.at(visibleIndexes.first());
+            const QPointF point(timeToX(sample.timeSec), valueToY(sample.value, minValue, maxValue));
+            painter.setBrush(color);
+            painter.drawEllipse(point, 2.5, 2.5);
+            painter.setBrush(Qt::NoBrush);
+        }
+        painter.drawLine(x, plot.top(), x, plot.bottom());
+        painter.setPen(QColor(150, 155, 165));
+        painter.drawLine(x, plot.bottom(), x, plot.bottom() + 5);
+        painter.drawText(x + 3, plot.bottom() + 20, QStringLiteral("%1 s").arg(t, 0, 'f', span < 2.0 ? 3 : 2));
+    }
+}
+
+void SignalPlotWidget::drawSignals(QPainter &painter, const QRect &plot) const
+{
+    Q_UNUSED(plot)
+
+    double minValue = 0.0;
+    double maxValue = 1.0;
+    calculateVisibleRange(&minValue, &maxValue);
+
+    int colorIndex = 0;
+    for (auto it = m_model->allSignals().constBegin(); it != m_model->allSignals().constEnd(); ++it, ++colorIndex) {
+        const SignalHistory &history = it.value();
+        if (!history.enabled || history.samples.isEmpty())
+            continue;
+
+        const QColor color = colorForSignalKey(it.key());
+        painter.setPen(QPen(color, 1.7));
+
         QPainterPath path;
         bool started = false;
         int pointsDrawn = 0;

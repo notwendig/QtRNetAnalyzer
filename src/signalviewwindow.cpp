@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QMap>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QVariant>
@@ -116,13 +117,19 @@ void SignalViewWindow::onSignalItemChanged(QTreeWidgetItem *item, int column)
         return;
 
     m_updatingTree = true;
+    const QSignalBlocker blocker(m_signalTree);
 
     if (isSourceItem(item)) {
-        const bool enabled = item->checkState(0) == Qt::Checked;
-        for (int i = 0; i < item->childCount(); ++i) {
-            QTreeWidgetItem *child = item->child(i);
-            child->setCheckState(0, enabled ? Qt::Checked : Qt::Unchecked);
-            m_history.setSignalEnabled(itemKey(child), enabled);
+        // PartiallyChecked is display-only. Do not treat it as unchecked,
+        // otherwise disabling one child signal disables the whole R-Net group.
+        const Qt::CheckState state = item->checkState(0);
+        if (state == Qt::Checked || state == Qt::Unchecked) {
+            const bool enabled = state == Qt::Checked;
+            for (int i = 0; i < item->childCount(); ++i) {
+                QTreeWidgetItem *child = item->child(i);
+                child->setCheckState(0, enabled ? Qt::Checked : Qt::Unchecked);
+                m_history.setSignalEnabled(itemKey(child), enabled);
+            }
         }
     } else if (isSignalItem(item)) {
         m_history.setSignalEnabled(itemKey(item), item->checkState(0) == Qt::Checked);
@@ -132,15 +139,17 @@ void SignalViewWindow::onSignalItemChanged(QTreeWidgetItem *item, int column)
             int checked = 0;
             for (int i = 0; i < parent->childCount(); ++i)
                 checked += parent->child(i)->checkState(0) == Qt::Checked ? 1 : 0;
-            parent->setCheckState(0, checked == 0 ? Qt::Unchecked : (checked == parent->childCount() ? Qt::Checked : Qt::PartiallyChecked));
+
+            const Qt::CheckState parentState = checked == 0
+                                                 ? Qt::Unchecked
+                                                 : (checked == parent->childCount() ? Qt::Checked : Qt::PartiallyChecked);
+            parent->setCheckState(0, parentState);
         }
     }
 
     m_updatingTree = false;
     m_plot->refreshView();
 }
-
-void SignalViewWindow::onPauseChanged(bool paused)
 {
     m_status->setText(paused
                           ? QStringLiteral("Paused. Ctrl+drag inside the plot to zoom, right click resets zoom.")
@@ -167,7 +176,7 @@ void SignalViewWindow::rebuildSignalTree()
         sourceItem->setText(0, sourceNames.value(sourceKey));
         sourceItem->setData(0, kItemKindRole, kKindSource);
         sourceItem->setData(0, kSourceKeyRole, QVariant::fromValue<qulonglong>(sourceKey));
-        sourceItem->setFlags(sourceItem->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsAutoTristate);
+        sourceItem->setFlags((sourceItem->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsAutoTristate);
         sourceItem->setExpanded(true);
 
         int enabledChildren = 0;
