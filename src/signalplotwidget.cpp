@@ -76,13 +76,10 @@ void SignalPlotWidget::paintEvent(QPaintEvent *)
 void SignalPlotWidget::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
-        if (event->modifiers() & Qt::ControlModifier) {
-            m_selecting = true;
-            m_selectionStart = event->pos();
-            m_selectionEnd = event->pos();
-        } else {
-            setPaused(!m_paused);
-        }
+        // Left-drag selects a time range for zoom. A plain click toggles live/pause on release.
+        m_selecting = true;
+        m_selectionStart = event->pos();
+        m_selectionEnd = event->pos();
         update();
     } else if (event->button() == Qt::RightButton) {
         resetZoom();
@@ -114,15 +111,21 @@ void SignalPlotWidget::mouseReleaseEvent(QMouseEvent *event)
     const QRect plot = plotRect();
     const int x1 = qBound(plot.left(), m_selectionStart.x(), plot.right());
     const int x2 = qBound(plot.left(), m_selectionEnd.x(), plot.right());
+    const int yDelta = qAbs(m_selectionEnd.y() - m_selectionStart.y());
+    const int xDelta = qAbs(x2 - x1);
 
-    if (qAbs(x2 - x1) > 8) {
-        const double t1 = xToTime(x1);
-        const double t2 = xToTime(x2);
-        m_viewStart = qMin(t1, t2);
-        m_viewEnd = qMax(t1, t2);
-        m_hasManualZoom = true;
-        setPaused(true);
-        emit selectionZoomed(m_viewStart, m_viewEnd);
+    if (xDelta > 8 || yDelta > 8) {
+        if (xDelta > 8) {
+            const double t1 = xToTime(x1);
+            const double t2 = xToTime(x2);
+            m_viewStart = qMin(t1, t2);
+            m_viewEnd = qMax(t1, t2);
+            m_hasManualZoom = true;
+            setPaused(true);
+            emit selectionZoomed(m_viewStart, m_viewEnd);
+        }
+    } else {
+        setPaused(!m_paused);
     }
 
     m_selecting = false;
@@ -322,7 +325,6 @@ void SignalPlotWidget::drawCrosshair(QPainter &painter, const QRect &plot) const
 
     painter.setPen(QPen(QColor(255, 220, 80), 1, Qt::DashLine));
     painter.drawLine(m_mousePos.x(), plot.top(), m_mousePos.x(), plot.bottom());
-    painter.drawLine(plot.left(), m_mousePos.y(), plot.right(), m_mousePos.y());
 
     painter.setPen(QColor(255, 235, 120));
     painter.drawText(m_mousePos.x() + 8, plot.top() + 18, QStringLiteral("t=%1 s").arg(xToTime(m_mousePos.x()), 0, 'f', 3));
@@ -334,7 +336,7 @@ void SignalPlotWidget::drawLegend(QPainter &painter, const QRect &plot) const
     painter.setPen(m_paused ? QColor(255, 190, 80) : QColor(120, 220, 120));
     painter.drawText(width() - 150, 22, m_paused ? QStringLiteral("PAUSED") : QStringLiteral("LIVE"));
     painter.setPen(QColor(150, 155, 165));
-    painter.drawText(width() - 260, height() - 8, QStringLiteral("Click: pause/live | Ctrl+drag: zoom | Right click: reset"));
+    painter.drawText(width() - 260, height() - 8, QStringLiteral("Click: pause/live | Drag: zoom | Right click: reset"));
 }
 
 QString SignalPlotWidget::cursorText(double timeSec) const

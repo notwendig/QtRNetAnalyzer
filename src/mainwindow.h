@@ -63,7 +63,6 @@ class MainWindow final : public QMainWindow
     QTabWidget *createViews();
     QWidget *createLiveTab();
     QWidget *createRNetTab();
-    QWidget *createSignalTab();
     QWidget *createLogTab();
     void openSignalViewWindow();
     void updateSignalViewAvailability();

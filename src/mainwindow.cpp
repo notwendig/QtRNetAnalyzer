@@ -280,7 +280,6 @@ QTabWidget *MainWindow::createViews()
     auto *tabs = new QTabWidget(this);
     tabs->addTab(createLiveTab(), QStringLiteral("Live Frames"));
     tabs->addTab(createRNetTab(), QStringLiteral("R-Net View"));
-    tabs->addTab(createSignalTab(), QStringLiteral("Signal View"));
     tabs->addTab(createLogTab(), QStringLiteral("Status / Log"));
     return tabs;
 }
@@ -308,10 +307,27 @@ QWidget *MainWindow::createRNetTab()
     auto *w = new QWidget(this);
     auto *layout = new QVBoxLayout(w);
 
+    auto *top = new QHBoxLayout;
+
     auto *hint = new QLabel(
-        QStringLiteral("Optimized for 125 kbit/s R-Net capture and candump replay. Known frames are decoded on demand."),
+        QStringLiteral("Optimized for 125 kbit/s R-Net capture and candump replay. Check R-Net rows in the Plot column, then open Signal View."),
         w);
     hint->setWordWrap(true);
+
+    m_signalViewBtn = new QPushButton(QStringLiteral("Signal View"), w);
+    m_signalViewBtn->setEnabled(false);
+    m_signalViewBtn->setToolTip(QStringLiteral("Enabled when at least one R-Net row is checked for plotting."));
+
+    top->addWidget(hint, 1);
+    top->addWidget(m_signalViewBtn, 0, Qt::AlignTop);
+
+    m_signalView = new SignalViewWindow(nullptr);
+    m_signalView->setWindowTitle(QStringLiteral("QtRNetAnalyzer - Signal View"));
+    m_signalView->resize(1100, 700);
+    m_signalView->setAttribute(Qt::WA_DeleteOnClose, false);
+    m_signalView->setInputEnabled(false);
+
+    connect(m_signalViewBtn, &QPushButton::clicked, this, &MainWindow::openSignalViewWindow);
 
     m_rnetView = new QTableView(w);
     m_rnetView->setAlternatingRowColors(true);
@@ -322,36 +338,8 @@ QWidget *MainWindow::createRNetTab()
     m_rnetView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_rnetView->horizontalHeader()->setStretchLastSection(true);
 
-    layout->addWidget(hint);
+    layout->addLayout(top);
     layout->addWidget(m_rnetView);
-    return w;
-}
-
-
-QWidget *MainWindow::createSignalTab()
-{
-    auto *w = new QWidget(this);
-    auto *layout = new QVBoxLayout(w);
-
-    auto *hint = new QLabel(
-        QStringLiteral("Signal View is opened as a detached window. Check at least one row in the R-Net table first."),
-        w);
-    hint->setWordWrap(true);
-
-    m_signalViewBtn = new QPushButton(QStringLiteral("Open detached Signal View"), w);
-    m_signalViewBtn->setEnabled(false);
-
-    m_signalView = new SignalViewWindow(nullptr);
-    m_signalView->setWindowTitle(QStringLiteral("QtRNetAnalyzer - Signal View"));
-    m_signalView->resize(1100, 700);
-    m_signalView->setAttribute(Qt::WA_DeleteOnClose, false);
-    m_signalView->setInputEnabled(false);
-
-    connect(m_signalViewBtn, &QPushButton::clicked, this, &MainWindow::openSignalViewWindow);
-
-    layout->addWidget(hint);
-    layout->addWidget(m_signalViewBtn);
-    layout->addStretch(1);
     return w;
 }
 
