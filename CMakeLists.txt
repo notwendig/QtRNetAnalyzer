@@ -59,16 +59,13 @@ target_link_libraries(QtRNetAnalyzer
 )
 
 #
-# Optional/full ControlCAN SDK handling
+# ControlCAN SDK autodetection
 #
-# Policy:
-#   - If third_party/controlcan.h exists, build the full hardware version.
-#   - For the full version the matching vendor library is required.
-#   - Expected repository layout:
-#
-#       third_party/controlcan.h
-#       third_party/x86/64-linux/libcontrolcan.so
-#       third_party/x86/32-linux/libcontrolcan.so
+# IMPORTANT:
+# The source code checks QTRA_HAS_CONTROLCAN.
+# Older generated CMake code only defined QTRNETANALYZER_WITH_CONTROLCAN,
+# which caused the stub implementation to be compiled even when the SDK
+# header and library were present. Keep both definitions for compatibility.
 #
 set(CONTROLCAN_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/third_party/controlcan.h")
 
@@ -105,6 +102,7 @@ if(EXISTS "${CONTROLCAN_HEADER}")
 
     target_compile_definitions(QtRNetAnalyzer
         PRIVATE
+            QTRA_HAS_CONTROLCAN=1
             QTRNETANALYZER_WITH_CONTROLCAN=1
     )
 
@@ -117,10 +115,15 @@ if(EXISTS "${CONTROLCAN_HEADER}")
     message(STATUS "ControlCAN header: ${CONTROLCAN_HEADER}")
     message(STATUS "ControlCAN library: ${CONTROLCAN_LIBRARY}")
 else()
+    target_compile_definitions(QtRNetAnalyzer
+        PRIVATE
+            QTRA_HAS_CONTROLCAN=0
+            QTRNETANALYZER_WITH_CONTROLCAN=0
+    )
+
     message(WARNING
-        "third_party/controlcan.h not found. This source tree currently expects "
-        "the ControlCAN SDK for hardware capture. Simulation replay still works "
-        "only if the source code is built with a compatible SDK/stub setup."
+        "third_party/controlcan.h not found. Hardware capture is disabled; "
+        "use Simulation > Select source for candump/lua replay."
     )
 endif()
 
