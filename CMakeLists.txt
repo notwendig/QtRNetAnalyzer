@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.19)
-project(RNetQt6Analyzer LANGUAGES CXX)
+
+project(QtRNetAnalyzer LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,7 +12,7 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
 
 qt_standard_project_setup()
 
-qt_add_executable(RNetQt6Analyzer
+qt_add_executable(QtRNetAnalyzer
     src/main.cpp
     src/mainwindow.cpp
     src/mainwindow.h
@@ -42,10 +43,20 @@ qt_add_executable(RNetQt6Analyzer
     src/signalviewwindow.h
 )
 
-target_include_directories(RNetQt6Analyzer PRIVATE src)
+target_include_directories(QtRNetAnalyzer PRIVATE src)
 
-target_link_libraries(RNetQt6Analyzer PRIVATE Qt6::Core Qt6::Widgets)
+# Optional proprietary ControlCAN SDK support. The app must still build
+# without the vendor header/library; in that case the hardware worker is a
+# clean stub and simulation/candump replay remains available.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/controlcan/controlcan.h")
+    target_include_directories(QtRNetAnalyzer PRIVATE third_party/controlcan)
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ControlCAN/controlcan.h")
+    target_include_directories(QtRNetAnalyzer PRIVATE third_party/ControlCAN)
+endif()
 
-install(TARGETS RNetQt6Analyzer
+target_link_libraries(QtRNetAnalyzer PRIVATE Qt6::Core Qt6::Widgets)
+
+install(TARGETS QtRNetAnalyzer
     BUNDLE DESTINATION .
-    RUNTIME DESTINATION bin)
+    RUNTIME DESTINATION bin
+)

@@ -1,5 +1,7 @@
 #include "controlcandeviceworker.h"
 
+#if QTRA_HAS_CONTROLCAN
+
 #include <algorithm>
 
 ControlCanDeviceWorker::ControlCanDeviceWorker(QObject *parent)
@@ -357,3 +359,99 @@ void ControlCanDeviceWorker::run()
         m_wait.wait(&m_mutex, std::max(1, m_config.pollDelayMs));
     }
 }
+#else
+
+ControlCanDeviceWorker::ControlCanDeviceWorker(QObject *parent)
+    : QThread(parent)
+{
+}
+
+ControlCanDeviceWorker::~ControlCanDeviceWorker()
+{
+    closeDevice();
+}
+
+QString ControlCanDeviceWorker::resultToString(long result) const
+{
+    return QStringLiteral("ControlCAN SDK unavailable, result=%1").arg(result);
+}
+
+bool ControlCanDeviceWorker::initChannel(const ChannelConfig &, QString *)
+{
+    return false;
+}
+
+bool ControlCanDeviceWorker::openDevice(const DeviceOpenConfig &config, QString *errorMessage)
+{
+    QMutexLocker locker(&m_mutex);
+    m_config = config;
+    m_open = false;
+    m_running = false;
+    if (errorMessage)
+    {
+        *errorMessage = QStringLiteral("ControlCAN SDK header controlcan.h not found. Hardware capture is disabled; use Simulation > Select source... for candump/lua replay.");
+    }
+    emit statusMessage(QStringLiteral("ControlCAN SDK unavailable"), true);
+    emit deviceStateChanged(false);
+    return false;
+}
+
+void ControlCanDeviceWorker::closeDevice()
+{
+    QMutexLocker locker(&m_mutex);
+    m_running = false;
+    m_open = false;
+    m_txQueue.clear();
+    m_wait.wakeAll();
+    emit deviceStateChanged(false);
+}
+
+bool ControlCanDeviceWorker::isOpen() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_open;
+}
+
+void ControlCanDeviceWorker::queueTransmit(int, quint32, const QByteArray &, bool, bool)
+{
+    emit statusMessage(QStringLiteral("Transmit ignored: ControlCAN SDK unavailable"), true);
+}
+
+void ControlCanDeviceWorker::clearHardwareBuffers()
+{
+    emit statusMessage(QStringLiteral("Clear ignored: ControlCAN SDK unavailable"), true);
+}
+
+void ControlCanDeviceWorker::resetChannels()
+{
+    emit statusMessage(QStringLiteral("Reset ignored: ControlCAN SDK unavailable"), true);
+}
+
+CanFrame ControlCanDeviceWorker::toFrame(const VCI_CAN_OBJ &obj, int channel, direction_t direction) const
+{
+    CanFrame frame;
+    frame.hostTime = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    frame.hwTimestamp = obj.TimeStamp;
+    frame.id = obj.ID;
+    frame.extended = (obj.ExternFlag != 0);
+    frame.remote = (obj.RemoteFlag != 0);
+    frame.error = false;
+    frame.data = QByteArray(reinterpret_cast<const char *>(obj.Data), obj.DataLen);
+    frame.channel = channel;
+    frame.direction = direction;
+    return frame;
+}
+
+void ControlCanDeviceWorker::processPendingTx()
+{
+}
+
+void ControlCanDeviceWorker::processRxForChannel(const ChannelConfig &)
+{
+}
+
+void ControlCanDeviceWorker::run()
+{
+}
+
+#endif

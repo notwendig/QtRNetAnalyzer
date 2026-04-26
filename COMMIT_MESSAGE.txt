@@ -1,1 +1,1 @@
-Add manual simulation replay menu
+Repair CMake target and make ControlCAN optional

@@ -6,9 +6,32 @@
 #include <QString>
 #include <QVector>
 #include <QWaitCondition>
+#include <QtGlobal>
 
 #include "canframe.h"
+
+#if __has_include("controlcan.h")
 #include "controlcan.h"
+#define QTRA_HAS_CONTROLCAN 1
+#else
+#define QTRA_HAS_CONTROLCAN 0
+using BYTE = quint8;
+using UCHAR = quint8;
+using DWORD = quint32;
+constexpr DWORD VCI_USBCAN2 = 4;
+struct VCI_CAN_OBJ
+{
+    DWORD ID = 0;
+    DWORD TimeStamp = 0;
+    BYTE TimeFlag = 0;
+    BYTE SendType = 0;
+    BYTE RemoteFlag = 0;
+    BYTE ExternFlag = 0;
+    BYTE DataLen = 0;
+    BYTE Data[8] = {0,0,0,0,0,0,0,0};
+    BYTE Reserved[3] = {0,0,0};
+};
+#endif
 
 struct ChannelConfig
 {
