@@ -1,24 +1,27 @@
 #pragma once
 
-#include <QDateTime>
+#include "canframe.h"
+
+#include <QByteArray>
 #include <QMutex>
 #include <QThread>
-#include <QString>
 #include <QVector>
 #include <QWaitCondition>
 #include <QtGlobal>
 
-#include "canframe.h"
-
-#if __has_include("controlcan.h")
-#include "controlcan.h"
-#define QTRA_HAS_CONTROLCAN 1
-#else
+#ifndef QTRA_HAS_CONTROLCAN
 #define QTRA_HAS_CONTROLCAN 0
+#endif
+
+#if QTRA_HAS_CONTROLCAN
+#include "controlcan.h"
+#else
 using BYTE = quint8;
 using UCHAR = quint8;
 using DWORD = quint32;
+
 constexpr DWORD VCI_USBCAN2 = 4;
+
 struct VCI_CAN_OBJ
 {
     DWORD ID = 0;
@@ -28,8 +31,8 @@ struct VCI_CAN_OBJ
     BYTE RemoteFlag = 0;
     BYTE ExternFlag = 0;
     BYTE DataLen = 0;
-    BYTE Data[8] = {0,0,0,0,0,0,0,0};
-    BYTE Reserved[3] = {0,0,0};
+    BYTE Data[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    BYTE Reserved[3] = {0, 0, 0};
 };
 #endif
 
@@ -59,7 +62,7 @@ class ControlCanDeviceWorker final : public QThread
 {
     Q_OBJECT
 
-  public:
+public:
     explicit ControlCanDeviceWorker(QObject *parent = nullptr);
     ~ControlCanDeviceWorker() override;
 
@@ -67,22 +70,22 @@ class ControlCanDeviceWorker final : public QThread
     void closeDevice();
     bool isOpen() const;
 
-  public slots:
+public slots:
     void queueTransmit(int channel, quint32 id, const QByteArray &data, bool extended, bool remote);
     void clearHardwareBuffers();
     void resetChannels();
 
-  signals:
+signals:
     void frameBatchReady(const QVector<CanFrame> &frames);
     void frameTransmitted(const CanFrame &frame);
     void countersUpdated(quint64 rx0, quint64 rx1, quint64 tx0, quint64 tx1, quint64 err0, quint64 err1);
     void statusMessage(const QString &message, bool error);
     void deviceStateChanged(bool open);
 
-  protected:
+protected:
     void run() override;
 
-  private:
+private:
     QString resultToString(long result) const;
     bool initChannel(const ChannelConfig &cfg, QString *errorMessage);
     void processRxForChannel(const ChannelConfig &cfg);

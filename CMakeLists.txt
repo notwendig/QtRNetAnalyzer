@@ -9,7 +9,6 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
-
 qt_standard_project_setup()
 
 qt_add_executable(QtRNetAnalyzer
@@ -43,64 +42,43 @@ qt_add_executable(QtRNetAnalyzer
     src/signalviewwindow.h
 )
 
-target_include_directories(QtRNetAnalyzer PRIVATE
-    src
-)
+target_include_directories(QtRNetAnalyzer PRIVATE src)
+target_link_libraries(QtRNetAnalyzer PRIVATE Qt6::Core Qt6::Widgets)
 
 # Optional proprietary ControlCAN SDK support.
-#
-# Rule:
-#   - If third_party/controlcan.h exists, build the full ControlCAN-enabled version.
-#   - Otherwise build the simulation/candump-only version.
-#
-# The source code uses __has_include("controlcan.h"), so adding third_party/ to
-# the include path is enough to enable the full implementation.
-set(QTRA_CONTROLCAN_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/third_party/controlcan.h")
+# Full hardware build is enabled only when BOTH the vendor header and library
+# are present. If only controlcan.h exists, the app still builds in
+# simulation/candump replay mode instead of failing at link time.
+set(QTRA_CONTROLCAN_INCLUDE_DIR "")
+set(QTRA_CONTROLCAN_LIBRARY "")
 
-if(EXISTS "${QTRA_CONTROLCAN_HEADER}")
-    message(STATUS "ControlCAN SDK detected: ${QTRA_CONTROLCAN_HEADER}")
-    message(STATUS "Building QtRNetAnalyzer with ControlCAN hardware support")
-
-    target_include_directories(QtRNetAnalyzer PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
-    )
-
-    target_compile_definitions(QtRNetAnalyzer PRIVATE
-        QTRA_CONTROLCAN_AVAILABLE=1
-    )
-
-    # Link vendor library if it is provided in third_party/.
-    # Header-only detection still enables the full source implementation; if the
-    # SDK library is required but missing, the linker will report the missing VCI
-    # symbols clearly instead of silently building a fake hardware version.
-    find_library(QTRA_CONTROLCAN_LIBRARY
-        NAMES controlcan ControlCAN libcontrolcan libControlCAN
-        PATHS "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
-        NO_DEFAULT_PATH
-    )
-
-    if(QTRA_CONTROLCAN_LIBRARY)
-        message(STATUS "ControlCAN library detected: ${QTRA_CONTROLCAN_LIBRARY}")
-        target_link_libraries(QtRNetAnalyzer PRIVATE "${QTRA_CONTROLCAN_LIBRARY}")
-    else()
-        message(WARNING
-            "third_party/controlcan.h exists, so the full ControlCAN source path "
-            "will be compiled, but no ControlCAN library was found in third_party/. "
-            "If your SDK requires a library, place libcontrolcan.so, libControlCAN.so, "
-            "libcontrolcan.a, or libControlCAN.a there."
-        )
-    endif()
-else()
-    message(STATUS "ControlCAN SDK not found: building simulation/candump-only version")
-    target_compile_definitions(QtRNetAnalyzer PRIVATE
-        QTRA_CONTROLCAN_AVAILABLE=0
-    )
-endif()
-
-target_link_libraries(QtRNetAnalyzer PRIVATE
-    Qt6::Core
-    Qt6::Widgets
+set(QTRA_CONTROLCAN_SEARCH_DIRS
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/controlcan"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ControlCAN"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
 )
+
+foreach(_dir IN LISTS QTRA_CONTROLCAN_SEARCH_DIRS)
+    if(EXISTS "${_dir}/controlcan.h" AND NOT QTRA_CONTROLCAN_INCLUDE_DIR)
+        set(QTRA_CONTROLCAN_INCLUDE_DIR "${_dir}")
+    endif()
+endforeach()
+
+find_library(QTRA_CONTROLCAN_LIBRARY
+    NAMES controlcan ControlCAN libcontrolcan libControlCAN
+    PATHS ${QTRA_CONTROLCAN_SEARCH_DIRS}
+    NO_DEFAULT_PATH
+)
+
+if(QTRA_CONTROLCAN_INCLUDE_DIR AND QTRA_CONTROLCAN_LIBRARY)
+    message(STATUS "ControlCAN enabled: ${QTRA_CONTROLCAN_LIBRARY}")
+    target_compile_definitions(QtRNetAnalyzer PRIVATE QTRA_HAS_CONTROLCAN=1)
+    target_include_directories(QtRNetAnalyzer PRIVATE "${QTRA_CONTROLCAN_INCLUDE_DIR}")
+    target_link_libraries(QtRNetAnalyzer PRIVATE "${QTRA_CONTROLCAN_LIBRARY}")
+else()
+    message(STATUS "ControlCAN disabled: vendor header and library were not both found")
+    target_compile_definitions(QtRNetAnalyzer PRIVATE QTRA_HAS_CONTROLCAN=0)
+endif()
 
 install(TARGETS QtRNetAnalyzer
     BUNDLE DESTINATION .
