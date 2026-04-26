@@ -12,13 +12,13 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationVersion(QStringLiteral("1.0"));
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("Qt6 ControlCAN Analyzer Pro with live CAN and candump replay"));
+    parser.setApplicationDescription(QStringLiteral("Qt6 ControlCAN Analyzer Pro with live CAN and manual simulation replay"));
     parser.addHelpOption();
     parser.addVersionOption();
 
     QCommandLineOption inputOption(
         QStringList() << QStringLiteral("i") << QStringLiteral("input"),
-        QStringLiteral("Read CAN frames from a candump text file instead of live CAN."),
+        QStringLiteral("Select a candump text file as simulation source without auto-start."),
         QStringLiteral("file"));
     parser.addOption(inputOption);
 

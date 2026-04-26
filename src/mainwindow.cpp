@@ -4,6 +4,7 @@
 #include "rnetframedelegate.h"
 
 #include <QAbstractItemView>
+#include <QAction>
 #include <QAbstractTableModel>
 #include <QCheckBox>
 #include <QColor>
@@ -21,6 +22,8 @@
 #include <QHash>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -68,6 +71,10 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
 {
     setWindowTitle(QStringLiteral("Qt6 ControlCAN Analyzer Pro"));
     resize(1400, 900);
+    m_simulationTimer = new QTimer(this);
+    m_simulationTimer->setInterval(10);
+    connect(m_simulationTimer, &QTimer::timeout, this, &MainWindow::replaySimulationTick);
+    createSimulationMenu();
     setCentralWidget(createCentral());
 
     m_liveModel = new LiveFrameModel(this);
@@ -135,19 +142,55 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
         m_openBtn->setEnabled(false);
         m_closeBtn->setEnabled(false);
         m_sendBtn->setEnabled(false);
-        statusBar()->showMessage(QStringLiteral("Simulation mode: candump input"));
-        QTimer::singleShot(0, this, &MainWindow::startSimulationIfRequested);
+
+        QString error;
+        if (!loadSimulationFile(m_inputFile, &error)) {
+            QMessageBox::warning(this, QStringLiteral("Simulation source"), error);
+            onStatusMessage(error, true);
+        } else {
+            statusBar()->showMessage(QStringLiteral("Simulation source selected. Use Simulation > Start once/repeat."));
+        }
     } else {
         statusBar()->showMessage(QStringLiteral("Ready"));
     }
+
+    updateSimulationActions();
 }
 
 MainWindow::~MainWindow()
 {
+    stopSimulation();
     m_logger.stop();
     m_worker->closeDevice();
     delete m_signalView;
     m_signalView = nullptr;
+}
+
+void MainWindow::createSimulationMenu()
+{
+    auto *menu = menuBar()->addMenu(QStringLiteral("&Simulation"));
+
+    m_simSelectAction = menu->addAction(QStringLiteral("Select source..."), this, &MainWindow::selectSimulationSource);
+    menu->addSeparator();
+    m_simStartRepeatAction = menu->addAction(QStringLiteral("Start repeat"), this, &MainWindow::startSimulationRepeat);
+    m_simStartOnceAction = menu->addAction(QStringLiteral("Start once"), this, &MainWindow::startSimulationOnce);
+    m_simStopAction = menu->addAction(QStringLiteral("Stop"), this, &MainWindow::stopSimulation);
+
+    updateSimulationActions();
+}
+
+void MainWindow::updateSimulationActions()
+{
+    const bool hasSource = !m_simulationFrames.isEmpty();
+
+    if (m_simSelectAction)
+        m_simSelectAction->setEnabled(!m_simulationRunning);
+    if (m_simStartRepeatAction)
+        m_simStartRepeatAction->setEnabled(hasSource && !m_simulationRunning);
+    if (m_simStartOnceAction)
+        m_simStartOnceAction->setEnabled(hasSource && !m_simulationRunning);
+    if (m_simStopAction)
+        m_simStopAction->setEnabled(m_simulationRunning);
 }
 
 QWidget *MainWindow::createCentral()
@@ -421,17 +464,21 @@ QString MainWindow::frameIdText(const CanFrame &frame)
     return "idtext";
 }
 
-bool MainWindow::parseCandumpLine(const QString &line, quint32 syntheticTs, CanFrame *frame)
+bool MainWindow::parseSimulationLine(const QString &line, quint32 syntheticTs, CanFrame *frame)
 {
     if (!frame)
         return false;
 
     const QString trimmed = line.trimmed();
-    if (trimmed.isEmpty() || trimmed.startsWith('#'))
+    if (trimmed.isEmpty() || trimmed.startsWith('#') || trimmed.startsWith(QStringLiteral("--")))
         return false;
 
-    QString payload = trimmed;
+    QString frameToken;
 
+    // candump formats:
+    //   (1622641895.104166) can0 02000300#0000
+    //   can0 02000300#0000
+    QString payload = trimmed;
     if (payload.startsWith('(')) {
         const int closePos = payload.indexOf(')');
         if (closePos > 0)
@@ -440,27 +487,31 @@ bool MainWindow::parseCandumpLine(const QString &line, quint32 syntheticTs, CanF
 
     const QStringList parts = payload.split(QRegularExpression(QStringLiteral("\\s+")),
                                             Qt::SkipEmptyParts);
-    if (parts.size() < 2)
-        return false;
 
-    int channel = 0;
-    QString frameToken;
-
-    if (parts.at(0).startsWith(QStringLiteral("can"), Qt::CaseInsensitive)) {
-        bool okChannel = false;
-        channel = parts.at(0).mid(3).toInt(&okChannel);
-        if (!okChannel)
-            channel = 0;
-        frameToken = parts.at(1);
-    } else if (parts.size() >= 3 && parts.at(1).startsWith(QStringLiteral("can"), Qt::CaseInsensitive)) {
-        bool okChannel = false;
-        channel = parts.at(1).mid(3).toInt(&okChannel);
-        if (!okChannel)
-            channel = 0;
-        frameToken = parts.at(2);
-    } else {
-        frameToken = parts.at(0);
+    for (const QString &part : parts) {
+        if (part.contains('#')) {
+            frameToken = part;
+            break;
+        }
     }
+
+    // Lua / script / text formats:
+    // scan for the first CAN frame token embedded in quotes/comments,
+    // for example "02000300#0000" or cansend can0 1C0C0000#32.
+    if (frameToken.isEmpty()) {
+        static const QRegularExpression tokenRe(
+            QStringLiteral("([0-9A-Fa-f]{1,8})#([0-9A-Fa-f]{0,16}|R|r)"));
+        const QRegularExpressionMatch match = tokenRe.match(trimmed);
+        if (!match.hasMatch())
+            return false;
+        frameToken = match.captured(0);
+    }
+
+    frameToken = frameToken.trimmed();
+    frameToken.remove('"');
+    frameToken.remove('\'');
+    frameToken.remove(',');
+    frameToken.remove(';');
 
     const int hashPos = frameToken.indexOf('#');
     if (hashPos <= 0)
@@ -475,7 +526,6 @@ bool MainWindow::parseCandumpLine(const QString &line, quint32 syntheticTs, CanF
 
     CanFrame f;
     f.hostTime = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-    Q_UNUSED(channel);
     f.hwTimestamp = syntheticTs;
     f.id = id;
     f.extended = idText.size() > 3;
@@ -495,22 +545,26 @@ bool MainWindow::parseCandumpLine(const QString &line, quint32 syntheticTs, CanF
     return true;
 }
 
-bool MainWindow::replayCandumpFile(const QString &path, QString *error)
+bool MainWindow::parseCandumpLine(const QString &line, quint32 syntheticTs, CanFrame *frame)
+{
+    return parseSimulationLine(line, syntheticTs, frame);
+}
+
+bool MainWindow::loadSimulationFile(const QString &path, QString *error)
 {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         if (error)
-            *error = QStringLiteral("Cannot open candump input file: %1").arg(path);
+            *error = QStringLiteral("Cannot open simulation source: %1").arg(path);
         return false;
     }
 
     QTextStream in(&file);
 
-    QVector<CanFrame> batch;
-    batch.reserve(1000);
+    QVector<CanFrame> frames;
+    frames.reserve(20000);
 
     quint32 syntheticTs = 0;
-    quint64 parsedCount = 0;
 
     while (true) {
         const QString line = in.readLine();
@@ -518,37 +572,29 @@ bool MainWindow::replayCandumpFile(const QString &path, QString *error)
             break;
 
         CanFrame frame;
-        if (!parseCandumpLine(line, syntheticTs, &frame))
+        if (!parseSimulationLine(line, syntheticTs, &frame))
             continue;
 
-        batch.push_back(frame);
+        frames.push_back(frame);
         syntheticTs += 100;
-        ++parsedCount;
-
-        if (batch.size() >= 1000) {
-            onFrameBatch(batch);
-            batch.clear();
-            QCoreApplication::processEvents();
-        }
     }
 
-    if (!batch.isEmpty()) {
-        onFrameBatch(batch);
-        batch.clear();
-        QCoreApplication::processEvents();
-    }
-
-    if (parsedCount == 0) {
+    if (frames.isEmpty()) {
         if (error)
-            *error = QStringLiteral("No valid candump frames found in: %1").arg(path);
+            *error = QStringLiteral("No valid CAN frames found in simulation source: %1").arg(path);
         return false;
     }
 
-    onCounters(parsedCount, 0, 0, 0, 0, 0);
-    onStatusMessage(QStringLiteral("Candump replay loaded: %1 (%2 frames)")
+    m_inputFile = path;
+    m_simulationMode = true;
+    m_simulationFrames = std::move(frames);
+    m_simulationIndex = 0;
+
+    onStatusMessage(QStringLiteral("Simulation source selected: %1 (%2 frames)")
                         .arg(path)
-                        .arg(parsedCount),
+                        .arg(m_simulationFrames.size()),
                     false);
+    updateSimulationActions();
     return true;
 }
 
@@ -777,15 +823,101 @@ void MainWindow::onDeviceStateChanged(bool open)
     }
 }
 
-void MainWindow::startSimulationIfRequested()
+void MainWindow::selectSimulationSource()
 {
-    if (!m_simulationMode || m_inputFile.isEmpty())
+    const QString path = QFileDialog::getOpenFileName(
+        this,
+        QStringLiteral("Select simulation source"),
+        m_inputFile.isEmpty() ? QDir::homePath() : m_inputFile,
+        QStringLiteral("Simulation sources (*.txt *.log *.candump *.lua);;Candump text (*.txt *.log *.candump);;Lua scripts (*.lua);;All files (*)"));
+
+    if (path.isEmpty())
         return;
 
     QString error;
-    if (!replayCandumpFile(m_inputFile, &error)) {
-        QMessageBox::warning(this, QStringLiteral("Candump input"), error);
+    if (!loadSimulationFile(path, &error)) {
+        QMessageBox::warning(this, QStringLiteral("Simulation source"), error);
         onStatusMessage(error, true);
-        return;
     }
 }
+
+void MainWindow::startSimulationOnce()
+{
+    if (m_simulationFrames.isEmpty())
+        return;
+
+    clearTables();
+
+    m_simulationRepeat = false;
+    m_simulationRunning = true;
+    m_simulationIndex = 0;
+    m_simulationTimer->start();
+
+    onStatusMessage(QStringLiteral("Simulation started once: %1").arg(m_inputFile), false);
+    updateSimulationActions();
+}
+
+void MainWindow::startSimulationRepeat()
+{
+    if (m_simulationFrames.isEmpty())
+        return;
+
+    clearTables();
+
+    m_simulationRepeat = true;
+    m_simulationRunning = true;
+    m_simulationIndex = 0;
+    m_simulationTimer->start();
+
+    onStatusMessage(QStringLiteral("Simulation started repeat: %1").arg(m_inputFile), false);
+    updateSimulationActions();
+}
+
+void MainWindow::stopSimulation()
+{
+    if (m_simulationTimer)
+        m_simulationTimer->stop();
+
+    if (m_simulationRunning)
+        onStatusMessage(QStringLiteral("Simulation stopped"), false);
+
+    m_simulationRunning = false;
+    updateSimulationActions();
+}
+
+void MainWindow::replaySimulationTick()
+{
+    if (!m_simulationRunning || m_simulationFrames.isEmpty()) {
+        stopSimulation();
+        return;
+    }
+
+    constexpr qsizetype kFramesPerTick = 80;
+
+    QVector<CanFrame> batch;
+    batch.reserve(kFramesPerTick);
+
+    for (qsizetype i = 0; i < kFramesPerTick; ++i) {
+        if (m_simulationIndex >= m_simulationFrames.size()) {
+            if (m_simulationRepeat) {
+                m_simulationIndex = 0;
+            } else {
+                break;
+            }
+        }
+
+        if (m_simulationIndex < m_simulationFrames.size())
+            batch.push_back(m_simulationFrames.at(m_simulationIndex++));
+    }
+
+    if (!batch.isEmpty())
+        onFrameBatch(batch);
+
+    onCounters(static_cast<quint64>(m_simulationIndex), 0, 0, 0, 0, 0);
+
+    if (!m_simulationRepeat && m_simulationIndex >= m_simulationFrames.size()) {
+        stopSimulation();
+        onStatusMessage(QStringLiteral("Simulation finished: %1 frames").arg(m_simulationFrames.size()), false);
+    }
+}
+

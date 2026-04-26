@@ -10,6 +10,7 @@
 #include "signalviewwindow.h"
 
 QT_BEGIN_NAMESPACE
+class QAction;
 class QCheckBox;
 class QComboBox;
 class QGroupBox;
@@ -20,6 +21,7 @@ class QPlainTextEdit;
 class QSpinBox;
 class QTableView;
 class QTabWidget;
+class QTimer;
 QT_END_NAMESPACE
 
 class QAbstractTableModel;
@@ -44,7 +46,11 @@ class MainWindow final : public QMainWindow
     void onCounters(quint64 rx0, quint64 rx1, quint64 tx0, quint64 tx1, quint64 err0, quint64 err1);
     void onStatusMessage(const QString &message, bool error);
     void onDeviceStateChanged(bool open);
-    void startSimulationIfRequested();
+    void selectSimulationSource();
+    void startSimulationOnce();
+    void startSimulationRepeat();
+    void stopSimulation();
+    void replaySimulationTick();
 
   private:
     struct ChannelWidgets {
@@ -57,6 +63,8 @@ class MainWindow final : public QMainWindow
     };
 
     QWidget *createCentral();
+    void createSimulationMenu();
+    void updateSimulationActions();
     QGroupBox *createDeviceGroup();
     QGroupBox *createChannelGroup(const QString &title, ChannelWidgets &widgets, int channel);
     QGroupBox *createTransmitGroup();
@@ -73,13 +81,23 @@ class MainWindow final : public QMainWindow
     static QString frameTypeText(const CanFrame &frame);
     static QString frameIdText(const CanFrame &frame);
 
+    static bool parseSimulationLine(const QString &line, quint32 syntheticTs, CanFrame *frame);
     static bool parseCandumpLine(const QString &line, quint32 syntheticTs, CanFrame *frame);
-    bool replayCandumpFile(const QString &path, QString *error);
+    bool loadSimulationFile(const QString &path, QString *error);
 
     void setStatusLamp(QLabel *label, const QString &text, const QString &color);
 
     QString m_inputFile;
     bool m_simulationMode = false;
+    bool m_simulationRepeat = false;
+    bool m_simulationRunning = false;
+    QVector<CanFrame> m_simulationFrames;
+    qsizetype m_simulationIndex = 0;
+    QTimer *m_simulationTimer = nullptr;
+    QAction *m_simSelectAction = nullptr;
+    QAction *m_simStartRepeatAction = nullptr;
+    QAction *m_simStartOnceAction = nullptr;
+    QAction *m_simStopAction = nullptr;
 
     ControlCanDeviceWorker *m_worker = nullptr;
     CanLogger m_logger;
