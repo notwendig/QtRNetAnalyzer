@@ -2,20 +2,22 @@
 
 #include "canframe.h"
 
-#include <QByteArray>
 #include <QMutex>
 #include <QThread>
 #include <QVector>
 #include <QWaitCondition>
-#include <QtGlobal>
 
-#ifndef QTRA_HAS_CONTROLCAN
-#define QTRA_HAS_CONTROLCAN 0
+#include <cstdint>
+#include <memory>
+
+#ifndef QTRA_HAS_WAVESHARE_USBCANB
+#define QTRA_HAS_WAVESHARE_USBCANB 0
 #endif
 
-#if QTRA_HAS_CONTROLCAN
-#include "controlcan.h"
-#else
+#if QTRA_HAS_WAVESHARE_USBCANB
+#include "qusbcanb_lowlevel.h"
+#endif
+
 using BYTE = quint8;
 using UCHAR = quint8;
 using DWORD = quint32;
@@ -34,7 +36,6 @@ struct VCI_CAN_OBJ
     BYTE Data[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     BYTE Reserved[3] = {0, 0, 0};
 };
-#endif
 
 struct ChannelConfig
 {
@@ -92,6 +93,14 @@ private:
     void processPendingTx();
     CanFrame toFrame(const VCI_CAN_OBJ &obj, int channel, direction_t direction) const;
 
+#if QTRA_HAS_WAVESHARE_USBCANB
+    static qusbcanb::Channel lowLevelChannel(int channelIndex);
+    static qusbcanb::CanMode lowLevelMode(UCHAR mode);
+    static std::uint32_t bitrateFromTiming(UCHAR timing0, UCHAR timing1);
+    static qusbcanb::CanFrame toLowLevelFrame(const CanFrame &frame);
+    static CanFrame fromLowLevelFrame(const qusbcanb::CanFrame &frame, int channel, direction_t direction);
+#endif
+
     mutable QMutex m_mutex;
     QWaitCondition m_wait;
     DeviceOpenConfig m_config;
@@ -104,4 +113,8 @@ private:
     quint64 m_tx1 = 0;
     quint64 m_err0 = 0;
     quint64 m_err1 = 0;
+
+#if QTRA_HAS_WAVESHARE_USBCANB
+    qusbcanb::LowLevelDevice m_device;
+#endif
 };

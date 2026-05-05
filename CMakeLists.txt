@@ -9,8 +9,42 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
-
 qt_standard_project_setup()
+
+option(QTRNET_ENABLE_WAVESHARE_USBCANB "Enable Waveshare USBCAN-B / CANalyst-II lowlevel backend" ON)
+
+set(QTRNET_WAVESHARE_TARGET "")
+set(QTRNET_WAVESHARE_SUBPROJECT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/waveshares_USBCAN_B")
+
+if(QTRNET_ENABLE_WAVESHARE_USBCANB)
+    if(EXISTS "${QTRNET_WAVESHARE_SUBPROJECT_DIR}/CMakeLists.txt")
+        add_subdirectory("${QTRNET_WAVESHARE_SUBPROJECT_DIR}" EXCLUDE_FROM_ALL)
+
+        if(TARGET QUsbCanBLowLevelStatic)
+            set(QTRNET_WAVESHARE_TARGET QUsbCanBLowLevelStatic)
+        elseif(TARGET qusbcanb::lowlevel_static)
+            set(QTRNET_WAVESHARE_TARGET qusbcanb::lowlevel_static)
+        elseif(TARGET qusbcanb::lowlevel_shared)
+            set(QTRNET_WAVESHARE_TARGET qusbcanb::lowlevel_shared)
+        else()
+            message(FATAL_ERROR "waveshares_USBCAN_B subproject was found, but no lowlevel CMake target was exported")
+        endif()
+
+        message(STATUS "Waveshare USBCAN-B subproject enabled: ${QTRNET_WAVESHARE_SUBPROJECT_DIR}")
+    else()
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            if(DEFINED ENV{HOME} AND NOT "$ENV{HOME}" STREQUAL "")
+                set(ENV{PKG_CONFIG_PATH} "$ENV{HOME}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+            endif()
+            pkg_check_modules(QUSBCANB_LOWLEVEL QUIET IMPORTED_TARGET qusbcanb_lowlevel)
+            if(QUSBCANB_LOWLEVEL_FOUND)
+                set(QTRNET_WAVESHARE_TARGET PkgConfig::QUSBCANB_LOWLEVEL)
+                message(STATUS "Waveshare USBCAN-B lowlevel pkg-config dependency enabled")
+            endif()
+        endif()
+    endif()
+endif()
 
 set(QTRNET_SOURCES
     src/main.cpp
@@ -58,73 +92,22 @@ target_link_libraries(QtRNetAnalyzer
         Qt6::Widgets
 )
 
-#
-# ControlCAN SDK autodetection
-#
-# IMPORTANT:
-# The source code checks QTRA_HAS_CONTROLCAN.
-# Older generated CMake code only defined QTRNETANALYZER_WITH_CONTROLCAN,
-# which caused the stub implementation to be compiled even when the SDK
-# header and library were present. Keep both definitions for compatibility.
-#
-set(CONTROLCAN_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/third_party/controlcan.h")
+if(QTRNET_WAVESHARE_TARGET)
+    target_link_libraries(QtRNetAnalyzer PRIVATE ${QTRNET_WAVESHARE_TARGET})
+    target_compile_definitions(QtRNetAnalyzer PRIVATE QTRA_HAS_WAVESHARE_USBCANB=1)
 
-if(EXISTS "${CONTROLCAN_HEADER}")
-    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-        set(CONTROLCAN_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/x86/64-linux")
-    else()
-        set(CONTROLCAN_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/x86/32-linux")
-    endif()
-
-    find_library(CONTROLCAN_LIBRARY
-        NAMES controlcan libcontrolcan
-        PATHS "${CONTROLCAN_LIB_DIR}"
-        NO_DEFAULT_PATH
-    )
-
-    if(NOT CONTROLCAN_LIBRARY)
-        message(FATAL_ERROR
-            "third_party/controlcan.h exists, therefore QtRNetAnalyzer must be built "
-            "as the full ControlCAN version, but no matching libcontrolcan library "
-            "was found in: ${CONTROLCAN_LIB_DIR}"
+    if(DEFINED ENV{HOME} AND EXISTS "$ENV{HOME}/lib")
+        set_target_properties(QtRNetAnalyzer PROPERTIES
+            BUILD_RPATH "$ENV{HOME}/lib"
+            INSTALL_RPATH "$ORIGIN;$ENV{HOME}/lib"
         )
     endif()
-
-    target_include_directories(QtRNetAnalyzer
-        PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/third_party
-    )
-
-    target_link_libraries(QtRNetAnalyzer
-        PRIVATE
-            ${CONTROLCAN_LIBRARY}
-    )
-
-    target_compile_definitions(QtRNetAnalyzer
-        PRIVATE
-            QTRA_HAS_CONTROLCAN=1
-            QTRNETANALYZER_WITH_CONTROLCAN=1
-    )
-
-    set_target_properties(QtRNetAnalyzer PROPERTIES
-        BUILD_RPATH "${CONTROLCAN_LIB_DIR}"
-        INSTALL_RPATH "$ORIGIN;${CONTROLCAN_LIB_DIR}"
-    )
-
-    message(STATUS "ControlCAN full hardware build enabled")
-    message(STATUS "ControlCAN header: ${CONTROLCAN_HEADER}")
-    message(STATUS "ControlCAN library: ${CONTROLCAN_LIBRARY}")
 else()
-    target_compile_definitions(QtRNetAnalyzer
-        PRIVATE
-            QTRA_HAS_CONTROLCAN=0
-            QTRNETANALYZER_WITH_CONTROLCAN=0
-    )
-
-    message(WARNING
-        "third_party/controlcan.h not found. Hardware capture is disabled; "
-        "use Simulation > Select source for candump/lua replay."
-    )
+    target_compile_definitions(QtRNetAnalyzer PRIVATE QTRA_HAS_WAVESHARE_USBCANB=0)
+    message(WARNING "Waveshare USBCAN-B lowlevel backend not found. Hardware capture is disabled; simulation replay still builds.\n"
+                    "To enable hardware capture, either run:\n"
+                    "  tools/add_waveshares_usbcan_submodule.sh\n"
+                    "or install waveshares_USBCAN_B to ~/lib and export PKG_CONFIG_PATH=\$HOME/lib/pkgconfig")
 endif()
 
 install(TARGETS QtRNetAnalyzer

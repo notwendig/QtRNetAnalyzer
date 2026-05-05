@@ -1,12 +1,18 @@
 #include "controlcandeviceworker.h"
 
+#include <QByteArray>
 #include <QDateTime>
 #include <QMutexLocker>
-#include <QString>
 
 #include <algorithm>
+#include <chrono>
+#include <vector>
 
-#if QTRA_HAS_CONTROLCAN
+namespace {
+
+constexpr int kMaxCanPayloadBytes = 8;
+
+} // namespace
 
 ControlCanDeviceWorker::ControlCanDeviceWorker(QObject *parent)
     : QThread(parent)
@@ -20,6 +26,11 @@ ControlCanDeviceWorker::~ControlCanDeviceWorker()
 
 QString ControlCanDeviceWorker::resultToString(long result) const
 {
+#if QTRA_HAS_WAVESHARE_USBCANB
+    if (!m_device.lastError().empty())
+        return QString::fromStdString(m_device.lastError());
+#endif
+
     if (result == 1)
         return QStringLiteral("OK");
     if (result == 0)
@@ -29,42 +40,97 @@ QString ControlCanDeviceWorker::resultToString(long result) const
     return QStringLiteral("result=%1").arg(result);
 }
 
+#if QTRA_HAS_WAVESHARE_USBCANB
+
+qusbcanb::Channel ControlCanDeviceWorker::lowLevelChannel(int channelIndex)
+{
+    return channelIndex == 0 ? qusbcanb::Channel::Can1 : qusbcanb::Channel::Can2;
+}
+
+qusbcanb::CanMode ControlCanDeviceWorker::lowLevelMode(UCHAR mode)
+{
+    switch (mode) {
+    case 0:
+        return qusbcanb::CanMode::Normal;
+    case 1:
+        return qusbcanb::CanMode::ListenOnly;
+    case 2:
+        return qusbcanb::CanMode::SelfTest;
+    default:
+        return qusbcanb::CanMode::Normal;
+    }
+}
+
+std::uint32_t ControlCanDeviceWorker::bitrateFromTiming(UCHAR timing0, UCHAR timing1)
+{
+    const quint16 timing = (static_cast<quint16>(timing0) << 8) | timing1;
+    switch (timing) {
+    case 0x0014:
+        return 1000000;
+    case 0x001C:
+        return 500000;
+    case 0x011C:
+        return 250000;
+    case 0x031C:
+        return 125000;
+    case 0x041C:
+        return 100000;
+    case 0x091C:
+        return 50000;
+    default:
+        return 125000;
+    }
+}
+
+qusbcanb::CanFrame ControlCanDeviceWorker::toLowLevelFrame(const CanFrame &frame)
+{
+    qusbcanb::CanFrame out;
+    out.id = frame.id;
+    out.extended = frame.extended;
+    out.remote = frame.remote;
+
+    const int len = std::min<int>(static_cast<int>(frame.data.size()), kMaxCanPayloadBytes);
+    out.dlc = static_cast<std::uint8_t>(len);
+    for (int i = 0; i < len; ++i)
+        out.data[static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(frame.data.at(i));
+
+    return out;
+}
+
+CanFrame ControlCanDeviceWorker::fromLowLevelFrame(const qusbcanb::CanFrame &frame, int channel, direction_t direction)
+{
+    CanFrame out;
+    out.hostTime = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    out.hwTimestamp = 0;
+    out.id = frame.id;
+    out.extended = frame.extended;
+    out.remote = frame.remote;
+    out.error = false;
+    out.channel = channel;
+    out.direction = direction;
+
+    const int len = std::min<int>(static_cast<int>(frame.dlc), kMaxCanPayloadBytes);
+    out.data.resize(len);
+    for (int i = 0; i < len; ++i)
+        out.data[i] = static_cast<char>(frame.data[static_cast<std::size_t>(i)]);
+
+    return out;
+}
+
 bool ControlCanDeviceWorker::initChannel(const ChannelConfig &cfg, QString *errorMessage)
 {
     if (!cfg.enabled)
         return true;
 
-    VCI_INIT_CONFIG initCfg{};
-    initCfg.AccCode = cfg.accCode;
-    initCfg.AccMask = cfg.accMask;
-    initCfg.Filter = cfg.filter;
-    initCfg.Timing0 = cfg.timing0;
-    initCfg.Timing1 = cfg.timing1;
-    initCfg.Mode = cfg.mode;
+    const std::uint32_t bitrate = bitrateFromTiming(cfg.timing0, cfg.timing1);
+    const qusbcanb::CanMode mode = lowLevelMode(cfg.mode);
+    const qusbcanb::Channel channel = lowLevelChannel(static_cast<int>(cfg.canIndex));
 
-    const long initRes = static_cast<long>(VCI_InitCAN(m_config.deviceType,
-                                                       m_config.deviceIndex,
-                                                       cfg.canIndex,
-                                                       &initCfg));
-    if (initRes != 1) {
+    if (!m_device.configure(channel, bitrate, mode)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("VCI_InitCAN(ch%1) failed: %2")
+            *errorMessage = QStringLiteral("Waveshare configure CAN%1 failed: %2")
                                 .arg(cfg.canIndex + 1)
-                                .arg(resultToString(initRes));
-        }
-        return false;
-    }
-
-    VCI_ClearBuffer(m_config.deviceType, m_config.deviceIndex, cfg.canIndex);
-
-    const long startRes = static_cast<long>(VCI_StartCAN(m_config.deviceType,
-                                                         m_config.deviceIndex,
-                                                         cfg.canIndex));
-    if (startRes != 1) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("VCI_StartCAN(ch%1) failed: %2")
-                                .arg(cfg.canIndex + 1)
-                                .arg(resultToString(startRes));
+                                .arg(QString::fromStdString(m_device.lastError()));
         }
         return false;
     }
@@ -85,18 +151,18 @@ bool ControlCanDeviceWorker::openDevice(const DeviceOpenConfig &config, QString 
     m_rx0 = m_rx1 = m_tx0 = m_tx1 = m_err0 = m_err1 = 0;
     m_txQueue.clear();
 
-    const long openRes = static_cast<long>(VCI_OpenDevice(m_config.deviceType,
-                                                          m_config.deviceIndex,
-                                                          0));
-    if (openRes != 1) {
-        if (errorMessage)
-            *errorMessage = QStringLiteral("VCI_OpenDevice failed: %1").arg(resultToString(openRes));
+    qusbcanb::DeviceConfig lowConfig;
+    if (!m_device.open(lowConfig)) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Waveshare USBCAN-B open failed: %1")
+                                .arg(QString::fromStdString(m_device.lastError()));
+        }
         return false;
     }
 
     QString localError;
     if (!initChannel(m_config.channel0, &localError) || !initChannel(m_config.channel1, &localError)) {
-        VCI_CloseDevice(m_config.deviceType, m_config.deviceIndex);
+        m_device.close();
         if (errorMessage)
             *errorMessage = localError;
         return false;
@@ -107,7 +173,7 @@ bool ControlCanDeviceWorker::openDevice(const DeviceOpenConfig &config, QString 
     locker.unlock();
 
     start();
-    emit statusMessage(QStringLiteral("Device opened"), false);
+    emit statusMessage(QStringLiteral("Waveshare USBCAN-B opened"), false);
     emit deviceStateChanged(true);
     return true;
 }
@@ -116,7 +182,7 @@ void ControlCanDeviceWorker::closeDevice()
 {
     {
         QMutexLocker locker(&m_mutex);
-        if (!m_open)
+        if (!m_open && !m_running)
             return;
         m_running = false;
         m_wait.wakeAll();
@@ -125,17 +191,12 @@ void ControlCanDeviceWorker::closeDevice()
     wait(1000);
 
     QMutexLocker locker(&m_mutex);
-    if (m_config.channel0.enabled)
-        VCI_ResetCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel0.canIndex);
-    if (m_config.channel1.enabled)
-        VCI_ResetCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel1.canIndex);
-
-    VCI_CloseDevice(m_config.deviceType, m_config.deviceIndex);
+    m_device.close();
     m_open = false;
     m_txQueue.clear();
     locker.unlock();
 
-    emit statusMessage(QStringLiteral("Device closed"), false);
+    emit statusMessage(QStringLiteral("Waveshare USBCAN-B closed"), false);
     emit deviceStateChanged(false);
 }
 
@@ -156,7 +217,7 @@ void ControlCanDeviceWorker::queueTransmit(int channel, quint32 id, const QByteA
     CanFrame tx;
     tx.channel = channel;
     tx.id = id;
-    tx.data = data;
+    tx.data = data.left(kMaxCanPayloadBytes);
     tx.extended = extended;
     tx.remote = remote;
     tx.direction = dir_tx;
@@ -171,11 +232,11 @@ void ControlCanDeviceWorker::clearHardwareBuffers()
         return;
 
     if (m_config.channel0.enabled)
-        VCI_ClearBuffer(m_config.deviceType, m_config.deviceIndex, m_config.channel0.canIndex);
+        m_device.clearRx(qusbcanb::Channel::Can1);
     if (m_config.channel1.enabled)
-        VCI_ClearBuffer(m_config.deviceType, m_config.deviceIndex, m_config.channel1.canIndex);
+        m_device.clearRx(qusbcanb::Channel::Can2);
 
-    emit statusMessage(QStringLiteral("Hardware buffers cleared"), false);
+    emit statusMessage(QStringLiteral("Hardware receive buffers cleared"), false);
 }
 
 void ControlCanDeviceWorker::resetChannels()
@@ -184,16 +245,11 @@ void ControlCanDeviceWorker::resetChannels()
     if (!m_open)
         return;
 
-    if (m_config.channel0.enabled) {
-        VCI_ResetCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel0.canIndex);
-        VCI_StartCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel0.canIndex);
-    }
-    if (m_config.channel1.enabled) {
-        VCI_ResetCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel1.canIndex);
-        VCI_StartCAN(m_config.deviceType, m_config.deviceIndex, m_config.channel1.canIndex);
-    }
+    QString error;
+    const bool ok0 = initChannel(m_config.channel0, &error);
+    const bool ok1 = initChannel(m_config.channel1, &error);
 
-    emit statusMessage(QStringLiteral("Channels reset"), false);
+    emit statusMessage(ok0 && ok1 ? QStringLiteral("Channels reconfigured") : error, !(ok0 && ok1));
 }
 
 CanFrame ControlCanDeviceWorker::toFrame(const VCI_CAN_OBJ &obj, int channel, direction_t direction) const
@@ -221,35 +277,23 @@ void ControlCanDeviceWorker::processPendingTx()
     }
 
     for (const CanFrame &tx : queue) {
-        VCI_CAN_OBJ obj{};
-        obj.ID = tx.id;
-        obj.SendType = 1;
-        obj.RemoteFlag = tx.remote ? 1 : 0;
-        obj.ExternFlag = tx.extended ? 1 : 0;
-        const qsizetype dataLen = std::min<qsizetype>(8, tx.data.size());
-        obj.DataLen = static_cast<BYTE>(dataLen);
-        for (int i = 0; i < obj.DataLen; ++i)
-            obj.Data[i] = static_cast<BYTE>(tx.data.at(i));
+        const qusbcanb::Channel channel = lowLevelChannel(tx.channel);
+        const qusbcanb::CanFrame frame = toLowLevelFrame(tx);
 
-        const long res = static_cast<long>(VCI_Transmit(m_config.deviceType,
-                                                        m_config.deviceIndex,
-                                                        tx.channel,
-                                                        &obj,
-                                                        1));
-        if (res == 1) {
+        if (m_device.send(channel, frame)) {
             if (tx.channel == 0)
                 ++m_tx0;
             else
                 ++m_tx1;
-            emit frameTransmitted(toFrame(obj, tx.channel, dir_tx));
+            emit frameTransmitted(tx);
         } else {
             if (tx.channel == 0)
                 ++m_err0;
             else
                 ++m_err1;
-            emit statusMessage(QStringLiteral("VCI_Transmit(ch%1) failed: %2")
+            emit statusMessage(QStringLiteral("Waveshare send CAN%1 failed: %2")
                                    .arg(tx.channel + 1)
-                                   .arg(resultToString(res)),
+                                   .arg(QString::fromStdString(m_device.lastError())),
                                true);
         }
     }
@@ -260,32 +304,39 @@ void ControlCanDeviceWorker::processRxForChannel(const ChannelConfig &cfg)
     if (!cfg.enabled)
         return;
 
-    const int len = std::max(64, m_config.receiveBatch);
-    QVector<VCI_CAN_OBJ> buf(len);
-    const long count = static_cast<long>(VCI_Receive(m_config.deviceType,
-                                                     m_config.deviceIndex,
-                                                     cfg.canIndex,
-                                                     buf.data(),
-                                                     len,
-                                                     0));
-    if (count > 0) {
-        QVector<CanFrame> frames;
-        frames.reserve(static_cast<int>(count));
-        for (long i = 0; i < count; ++i)
-            frames.push_back(toFrame(buf[static_cast<int>(i)], cfg.canIndex, dir_rx));
+    std::vector<qusbcanb::CanFrame> rawFrames;
+    const std::size_t maxFrames = static_cast<std::size_t>(std::max(1, m_config.receiveBatch));
+    const auto timeout = std::chrono::milliseconds{0};
 
-        if (cfg.canIndex == 0)
-            m_rx0 += static_cast<quint64>(count);
-        else
-            m_rx1 += static_cast<quint64>(count);
-        emit frameBatchReady(frames);
-    } else if (count == -1) {
-        if (cfg.canIndex == 0)
-            ++m_err0;
-        else
-            ++m_err1;
-        emit statusMessage(QStringLiteral("VCI_Receive(ch%1) failed").arg(cfg.canIndex + 1), true);
+    if (!m_device.receive(lowLevelChannel(static_cast<int>(cfg.canIndex)), rawFrames, maxFrames, timeout)) {
+        const std::string err = m_device.lastError();
+        if (!err.empty()) {
+            if (cfg.canIndex == 0)
+                ++m_err0;
+            else
+                ++m_err1;
+            emit statusMessage(QStringLiteral("Waveshare receive CAN%1 failed: %2")
+                                   .arg(cfg.canIndex + 1)
+                                   .arg(QString::fromStdString(err)),
+                               true);
+        }
+        return;
     }
+
+    if (rawFrames.empty())
+        return;
+
+    QVector<CanFrame> frames;
+    frames.reserve(static_cast<qsizetype>(rawFrames.size()));
+    for (const qusbcanb::CanFrame &raw : rawFrames)
+        frames.push_back(fromLowLevelFrame(raw, static_cast<int>(cfg.canIndex), dir_rx));
+
+    if (cfg.canIndex == 0)
+        m_rx0 += static_cast<quint64>(frames.size());
+    else
+        m_rx1 += static_cast<quint64>(frames.size());
+
+    emit frameBatchReady(frames);
 }
 
 void ControlCanDeviceWorker::run()
@@ -309,22 +360,7 @@ void ControlCanDeviceWorker::run()
     }
 }
 
-#else
-
-ControlCanDeviceWorker::ControlCanDeviceWorker(QObject *parent)
-    : QThread(parent)
-{
-}
-
-ControlCanDeviceWorker::~ControlCanDeviceWorker()
-{
-    closeDevice();
-}
-
-QString ControlCanDeviceWorker::resultToString(long result) const
-{
-    return QStringLiteral("ControlCAN SDK unavailable, result=%1").arg(result);
-}
+#else // QTRA_HAS_WAVESHARE_USBCANB
 
 bool ControlCanDeviceWorker::initChannel(const ChannelConfig &, QString *)
 {
@@ -337,12 +373,11 @@ bool ControlCanDeviceWorker::openDevice(const DeviceOpenConfig &config, QString 
     m_config = config;
     m_open = false;
     m_running = false;
-
     if (errorMessage) {
-        *errorMessage = QStringLiteral("ControlCAN SDK is incomplete. Hardware capture is disabled; use Simulation > Select source for candump/lua replay.");
+        *errorMessage = QStringLiteral("Waveshare USBCAN-B lowlevel library is not available. "
+                                       "Run tools/add_waveshares_usbcan_submodule.sh or install it to ~/lib.");
     }
-
-    emit statusMessage(QStringLiteral("ControlCAN SDK unavailable or incomplete"), true);
+    emit statusMessage(QStringLiteral("Waveshare USBCAN-B lowlevel library unavailable"), true);
     emit deviceStateChanged(false);
     return false;
 }
@@ -365,17 +400,17 @@ bool ControlCanDeviceWorker::isOpen() const
 
 void ControlCanDeviceWorker::queueTransmit(int, quint32, const QByteArray &, bool, bool)
 {
-    emit statusMessage(QStringLiteral("Transmit ignored: ControlCAN SDK unavailable or incomplete"), true);
+    emit statusMessage(QStringLiteral("Transmit ignored: Waveshare USBCAN-B lowlevel library unavailable"), true);
 }
 
 void ControlCanDeviceWorker::clearHardwareBuffers()
 {
-    emit statusMessage(QStringLiteral("Clear ignored: ControlCAN SDK unavailable or incomplete"), true);
+    emit statusMessage(QStringLiteral("Clear ignored: Waveshare USBCAN-B lowlevel library unavailable"), true);
 }
 
 void ControlCanDeviceWorker::resetChannels()
 {
-    emit statusMessage(QStringLiteral("Reset ignored: ControlCAN SDK unavailable or incomplete"), true);
+    emit statusMessage(QStringLiteral("Reset ignored: Waveshare USBCAN-B lowlevel library unavailable"), true);
 }
 
 CanFrame ControlCanDeviceWorker::toFrame(const VCI_CAN_OBJ &obj, int channel, direction_t direction) const
@@ -405,4 +440,4 @@ void ControlCanDeviceWorker::run()
 {
 }
 
-#endif
+#endif // QTRA_HAS_WAVESHARE_USBCANB
