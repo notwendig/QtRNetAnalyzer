@@ -90,5 +90,4 @@ Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International. See `LI
 
 The optional ControlCAN integration depends on vendor-provided proprietary files that are **not** part of this repository.
 You must obtain those files yourself and place them locally under `third_party/`.
-=======
->>>>>>> chatgpt
+
