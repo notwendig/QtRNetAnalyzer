@@ -17,27 +17,6 @@ It provides live CAN tables, decoded R-Net views, frame tagging, manual replay, 
 - Optional proprietary ControlCAN hardware integration when the SDK files are present
 - Simulation-first workflow for development without hardware
 
-## Screenshots
-
-### Live CAN table
-
-Real-time CAN frame capture with timestamp, ID, DLC and raw payload view.
-
-<img src="doc/pictures/Bildschirmfoto%20vom%202026-04-23%2018-50-01.png" alt="QtRNetAnalyzer live CAN table" width="760">
-
-### R-Net decoder table
-
-Decoded R-Net frames with grouping, counters, tags and extracted payload values.
-
-<img src="doc/pictures/Bildschirmfoto%20vom%202026-04-23%2018-58-44.png" alt="QtRNetAnalyzer R-Net decoder table" width="760">
-
-### R-Net signal plot
-
-Interactive visualization for tagged R-Net frames and accumulated signal history.
-
-<img src="doc/pictures/Bildschirmfoto%20vom%202026-04-26%2005-42-50.png" alt="QtRNetAnalyzer R-Net signal plot" width="760">
-
-
 ## Build modes
 
 ### Simulation-only build
@@ -135,14 +114,15 @@ Simulation -> Start once
 
 ## RX/TX direction convention
 
-Direction labels are written from the ESP/gateway point of view:
+Direction labels are written from the ESP/gateway point of view and are included directly in simulation/replay files:
 
 ```text
-App -> ESP = RX
-ESP -> App = TX
+RX = App -> ESP command; later real-CAN mode sends this CAN frame
+TX = ESP -> App report; later real-CAN mode received this CAN frame
 ```
 
-This convention is used consistently in the simulator and replay logs.
+In short: **RX CAN frames are later sent by the ESP**, and **TX CAN frames are later received/reported back to the app/analyzer**.
+This convention is used consistently in the built-in simulator, replay logs, and generated `.candump` files.
 
 ## Relative simulation timing
 
@@ -158,13 +138,20 @@ This makes captures easier to compare regardless of their original absolute time
 
 ## Candump examples
 
-The analyzer accepts candump-style CAN frame tokens such as:
+The analyzer accepts candump-style CAN frame tokens with optional timestamp and RX/TX marker, for example:
+
+```text
+(0.000000) RX can0 00C#
+(0.020000) RX can0 02000100#0000
+(0.030000) RX can0 02000100#0064
+(0.040000) RX can0 02000100#6400
+(0.050000) TX can0 1C0C0300#60
+```
+
+Legacy bare frame tokens are still accepted for quick manual tests:
 
 ```text
 00C#
-02000100#0000
-02000100#0064
-02000100#6400
 02000300#0000
 ```
 
@@ -182,16 +169,6 @@ Xx   = signed int8 X axis encoded as one byte
 Yy   = signed int8 Y axis encoded as one byte
 ```
 
-## Documentation assets
-
-README screenshots are stored in:
-
-```text
-doc/pictures/
-```
-
-The file names contain spaces, so the README uses URL-encoded paths with `%20` for stable GitHub rendering.
-
 ## Development workflow
 
 Recommended workflow for this branch:
@@ -208,7 +185,7 @@ After changing this README:
 
 ```bash
 git add README.md
-git commit -m "Restore README screenshots"
+git commit -m "Update README for R-Net wheelchair simulation"
 git push origin chatgpt
 ```
 

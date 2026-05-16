@@ -1,0 +1,14 @@
+QtRNetAnalyzer simulation files
+
+All simulation timestamps are relative to 0.000000 s.
+All CAN lines use mandatory ESP-perspective RX/TX labels:
+
+  RX = App -> ESP command; later real-CAN mode sends this CAN frame
+  TX = ESP -> App report; later real-CAN mode received this CAN frame
+
+Files:
+- README.md
+- rnet_wheelchair_jsm_login_drive.candump
+- controlcan_capture_converted.candump
+- controlcan_capture_summary.md
+- controlcan_capture.csv
