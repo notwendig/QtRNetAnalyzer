@@ -17,6 +17,27 @@ It provides live CAN tables, decoded R-Net views, frame tagging, manual replay, 
 - Optional proprietary ControlCAN hardware integration when the SDK files are present
 - Simulation-first workflow for development without hardware
 
+## Screenshots
+
+### Live CAN table
+
+Real-time CAN frame capture with timestamp, ID, DLC and raw payload view.
+
+<img src="doc/pictures/Bildschirmfoto%20vom%202026-04-23%2018-50-01.png" alt="QtRNetAnalyzer live CAN table" width="760">
+
+### R-Net decoder table
+
+Decoded R-Net frames with grouping, counters, tags and extracted payload values.
+
+<img src="doc/pictures/Bildschirmfoto%20vom%202026-04-23%2018-58-44.png" alt="QtRNetAnalyzer R-Net decoder table" width="760">
+
+### R-Net signal plot
+
+Interactive visualization for tagged R-Net frames and accumulated signal history.
+
+<img src="doc/pictures/Bildschirmfoto%20vom%202026-04-26%2005-42-50.png" alt="QtRNetAnalyzer R-Net signal plot" width="760">
+
+
 ## Build modes
 
 ### Simulation-only build
@@ -161,6 +182,16 @@ Xx   = signed int8 X axis encoded as one byte
 Yy   = signed int8 Y axis encoded as one byte
 ```
 
+## Documentation assets
+
+README screenshots are stored in:
+
+```text
+doc/pictures/
+```
+
+The file names contain spaces, so the README uses URL-encoded paths with `%20` for stable GitHub rendering.
+
 ## Development workflow
 
 Recommended workflow for this branch:
@@ -177,7 +208,7 @@ After changing this README:
 
 ```bash
 git add README.md
-git commit -m "Update README for R-Net wheelchair simulation"
+git commit -m "Restore README screenshots"
 git push origin chatgpt
 ```
 
