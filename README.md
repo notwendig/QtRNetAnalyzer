@@ -1,93 +1,192 @@
 # QtRNetAnalyzer
 
-Qt6 desktop analyzer for CAN and R-Net traffic with live tables, R-Net decoding, tagging, and live signal plotting.
+QtRNetAnalyzer is a Qt 6 desktop analyzer for CAN and R-Net traffic.
+It provides live CAN tables, decoded R-Net views, frame tagging, manual replay, and signal plotting for development and laboratory analysis without requiring a connected wheelchair.
+
+> Safety note: the included wheelchair/JSM material is for **simulation and analyzer replay only**. It is not a real JSM registration procedure and must not be used as a direct control sequence for a powered wheelchair.
 
 ## Features
 
-- Live CAN table with sorting
-- Decoded R-Net table with aggregation by type key
-- Taggable R-Net messages
-- Live plot window for tagged frames including accumulated history
-- Simulator mode for development without hardware
-- Optional proprietary ControlCAN integration
+- Live CAN frame table
+- R-Net decoded frame table
+- R-Net frame aggregation by type/key
+- Taggable R-Net frames
+- Live signal plotting for selected/tagged frames
+- Manual simulation replay from candump/Lua/text sources
+- Synthetic R-Net wheelchair simulation with simulated JSM login and drive frames
+- Optional proprietary ControlCAN hardware integration when the SDK files are present
+- Simulation-first workflow for development without hardware
 
-## Screenshots
+## Build modes
 
-### Live Table
-Real-time CAN frame capture with timestamp, ID, DLC and raw payload view.  
-Optimized for high bus load and continuous monitoring.
+### Simulation-only build
 
-<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-50-01.png" width="900">
-
----
-
-### R-Net Decoder Table
-Decoded R-Net frames with type grouping, counters and parameter extraction.
-
-<img src="doc/pictures/Bildschirmfoto vom 2026-04-23 18-58-44.png" width="900">
-
----
-
-### R-Net Signal Plot
-Interactive live visualization of tagged R-Net messages.  
-Tracks payload evolution over time with full history support.
-
-<img src="doc/pictures/Bildschirmfoto vom 2026-04-26 05-42-50.png" width="900">
-
----
-## Build
-
-### Simulator-only build
+The project always builds without the proprietary ControlCAN SDK.
+In this mode, hardware capture is disabled, but the simulation menu can replay `candump`, Lua, or text files containing CAN frame tokens.
 
 ```bash
-mkdir -p build
-cd build
-cmake ..
-cmake --build .
-./QtRNetAnalyzer --input <candump.txt>
-<<<<<<< HEAD
+cmake -S . -B build/Desktop-Debug
+cmake --build build/Desktop-Debug -j"$(nproc)"
+./build/Desktop-Debug/QtRNetAnalyzer
 ```
 
-### Build with proprietary ControlCAN SDK
+### Full ControlCAN hardware build
 
-Place the vendor SDK header and shared library in `third_party/` and configure with:
+The full hardware version is enabled automatically only when both the ControlCAN header and library are available.
+Accepted layouts include:
+
+```text
+third_party/controlcan/controlcan.h
+third_party/controlcan/libcontrolcan.so
+
+third_party/ControlCAN/controlcan.h
+third_party/ControlCAN/libControlCAN.so
+
+third_party/controlcan.h
+third_party/libcontrolcan.so
+```
+
+If only `controlcan.h` exists but the library is missing, the build intentionally falls back to simulation-only mode.
+This avoids linker errors such as unresolved references to `VCI_OpenDevice`, `VCI_InitCAN`, `VCI_Receive`, or `VCI_Transmit`.
+
+## Simulation menu
+
+The simulation menu is manual by design:
+
+```text
+Simulation
+├── Select source...
+├── Load R-Net wheelchair simulation (JSM login)
+├── Start once
+├── Start repeat
+└── Stop
+```
+
+No simulation starts automatically.
+Select or load a source first, then start it manually.
+
+## Included R-Net wheelchair simulation
+
+The simulator can replay a synthetic R-Net wheelchair startup and drive sequence.
+The sequence is intended to exercise the analyzer UI, CAN table, R-Net decoder, signal history, and plotting logic.
+
+It includes simulated examples of:
+
+- CAN bus startup/test frames such as `00C#`
+- simulated JSM login/authentication phases
+- simulated parameter/mode frames
+- simulated ready/status frames
+- simulated speed-limit/status frames
+- simulated joystick frames such as `02000300#XxYy`
+- simulated battery/load/heartbeat frames
+
+This is not a real wheelchair startup sequence.
+It is intentionally a laboratory simulation.
+
+## Simulation files
+
+Simulation files are stored below:
+
+```text
+doc/simulations/
+├── README.md
+├── FILES.txt
+├── rnet_wheelchair_jsm_login_drive.candump
+├── controlcan_capture_converted.candump
+├── controlcan_capture_summary.md
+└── controlcan_capture.csv
+```
+
+Typical usage:
+
+```text
+Simulation -> Select source...
+doc/simulations/controlcan_capture_converted.candump
+Simulation -> Start once
+```
+
+Or use the built-in synthetic source:
+
+```text
+Simulation -> Load R-Net wheelchair simulation (JSM login)
+Simulation -> Start once
+```
+
+## RX/TX direction convention
+
+Direction labels are written from the ESP/gateway point of view:
+
+```text
+App -> ESP = RX
+ESP -> App = TX
+```
+
+This convention is used consistently in the simulator and replay logs.
+
+## Relative simulation timing
+
+Simulation and replay timestamps are normalized to the first valid frame.
+The first frame is shown as:
+
+```text
+0.000000 s
+```
+
+All following times are relative to that zero point.
+This makes captures easier to compare regardless of their original absolute timestamp source.
+
+## Candump examples
+
+The analyzer accepts candump-style CAN frame tokens such as:
+
+```text
+00C#
+02000100#0000
+02000100#0064
+02000100#6400
+02000300#0000
+```
+
+For R-Net joystick test traffic, the common synthetic form is:
+
+```text
+02000M00#XxYy
+```
+
+Where:
+
+```text
+M    = simulated device/module slot
+Xx   = signed int8 X axis encoded as one byte
+Yy   = signed int8 Y axis encoded as one byte
+```
+
+## Development workflow
+
+Recommended workflow for this branch:
 
 ```bash
-mkdir -p build
-cd build
-cmake -DENABLE_CONTROLCAN=ON ..
-cmake --build .
-./QtRNetAnalyzer
+git checkout chatgpt
+git pull --rebase origin chatgpt
+cmake -S . -B build/Desktop-Debug
+cmake --build build/Desktop-Debug -j"$(nproc)"
+./build/Desktop-Debug/QtRNetAnalyzer
 ```
 
-Expected library path:
+After changing this README:
 
-- `third_party/x86/64-linux/libcontrolcan.so`
+```bash
+git add README.md
+git commit -m "Update README for R-Net wheelchair simulation"
+git push origin chatgpt
+```
 
-## Repository layout
+## Current branch policy
 
-- `*.cpp`, `*.h` — application source code, licensed under GPL-3.0-only
-- `README.md` and other documentation — licensed under CC BY-NC-SA 4.0
-- `third_party/` — not included; vendor SDK files belong to their respective owners
+All generated fixes are based on:
 
-## Licensing
+```text
+https://github.com/notwendig/QtRNetAnalyzer/tree/chatgpt
+```
 
-### Code
-
-This project's source code is licensed under the GNU General Public License v3.0 only. See `LICENSE`.
-
-### Documentation and analysis text
-
-Documentation, protocol notes, and explanatory text in this repository are licensed under
-Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International. See `LICENSE.docs`.
-
-## Authors
-
-- ChatGPT (GPT-5.4 Thinking)
-- Jürgen Willi Sievers <JSievers@NadiSoft.de>
-
-## Note about proprietary SDK files
-
-The optional ControlCAN integration depends on vendor-provided proprietary files that are **not** part of this repository.
-You must obtain those files yourself and place them locally under `third_party/`.
-
+Generated ZIP files should preserve the real project structure and contain only the affected complete files unless a larger project export is explicitly requested.
