@@ -2,6 +2,8 @@
 
 #include <QMainWindow>
 #include <QSet>
+#include <QString>
+#include <QVector>
 
 #include "canlogger.h"
 #include "controlcandeviceworker.h"
@@ -30,11 +32,12 @@ class QSortFilterProxyModel;
 class MainWindow final : public QMainWindow
 {
     Q_OBJECT
-  public:
+
+public:
     explicit MainWindow(const QString &inputFile = QString(), QWidget *parent = nullptr);
     ~MainWindow() override;
 
-  private slots:
+private slots:
     void openDevice();
     void closeDevice();
     void sendFrame();
@@ -47,13 +50,15 @@ class MainWindow final : public QMainWindow
     void onStatusMessage(const QString &message, bool error);
     void onDeviceStateChanged(bool open);
     void selectSimulationSource();
+    void loadWheelchairSimulation();
     void startSimulationOnce();
     void startSimulationRepeat();
     void stopSimulation();
     void replaySimulationTick();
 
-  private:
-    struct ChannelWidgets {
+private:
+    struct ChannelWidgets
+    {
         QCheckBox *enabled = nullptr;
         QComboBox *mode = nullptr;
         QComboBox *filter = nullptr;
@@ -74,17 +79,15 @@ class MainWindow final : public QMainWindow
     QWidget *createLogTab();
     void openSignalViewWindow();
     void updateSignalViewAvailability();
-
     DeviceOpenConfig currentConfigFromUi(bool *ok = nullptr, QString *error = nullptr) const;
     static bool parseHexUInt(const QString &text, quint32 *value);
     static QByteArray parseHexBytes(const QString &text, bool *ok);
     static QString frameTypeText(const CanFrame &frame);
     static QString frameIdText(const CanFrame &frame);
-
     static bool parseSimulationLine(const QString &line, quint32 syntheticTs, CanFrame *frame);
     static bool parseCandumpLine(const QString &line, quint32 syntheticTs, CanFrame *frame);
     bool loadSimulationFile(const QString &path, QString *error);
-
+    void setSimulationFrames(const QString &sourceName, QVector<CanFrame> frames);
     void setStatusLamp(QLabel *label, const QString &text, const QString &color);
 
     QString m_inputFile;
@@ -95,6 +98,7 @@ class MainWindow final : public QMainWindow
     qsizetype m_simulationIndex = 0;
     QTimer *m_simulationTimer = nullptr;
     QAction *m_simSelectAction = nullptr;
+    QAction *m_simLoadWheelchairAction = nullptr;
     QAction *m_simStartRepeatAction = nullptr;
     QAction *m_simStartOnceAction = nullptr;
     QAction *m_simStopAction = nullptr;
@@ -111,7 +115,6 @@ class MainWindow final : public QMainWindow
     QPushButton *m_logBtn = nullptr;
     QPushButton *m_clearBtn = nullptr;
     QPushButton *m_rnetPresetBtn = nullptr;
-
     ChannelWidgets m_ch0;
     ChannelWidgets m_ch1;
 
@@ -136,4 +139,5 @@ class MainWindow final : public QMainWindow
     QSortFilterProxyModel *m_rnetProxy = nullptr;
 
     quint64 m_displayedFrames = 0;
+    qint64 m_statusLogBaseMs = -1;
 };
