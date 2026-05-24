@@ -1,200 +1,219 @@
 # QtRNetAnalyzer
 
-QtRNetAnalyzer is a Qt 6 desktop analyzer for CAN and R-Net traffic.
-It provides live CAN tables, decoded R-Net views, frame tagging, manual replay, and signal plotting for development and laboratory analysis without requiring a connected wheelchair.
+QtRNetAnalyzer is a Qt 6 desktop analyzer for CAN and R-Net traffic. It provides live CAN tables, decoded R-Net aggregation, taggable R-Net messages, a live signal plot window and simulator/replay support.
 
-> Safety note: the included wheelchair/JSM material is for **simulation and analyzer replay only**. It is not a real JSM registration procedure and must not be used as a direct control sequence for a powered wheelchair.
+The current hardware path is **Linux SocketCAN**. For Waveshare USBCAN-B / CANalyst-II compatible hardware, use the external [`waveUSBCAN_b`](https://github.com/notwendig/waveUSBCAN_b) driver to expose normal Linux CAN interfaces such as `can0` and `can1`. QtRNetAnalyzer then opens those SocketCAN interfaces directly.
+
+## Current status
+
+- Primary branch for ongoing development: `chatgpt`
+- Default hardware backend: SocketCAN on Linux
+- Recommended USB-CAN driver: `waveUSBCAN_b`
+- Proprietary ControlCAN/VCI userspace integration: removed from the active path
+- Simulator/replay mode: available without hardware
 
 ## Features
 
-- Live CAN frame table
-- R-Net decoded frame table
-- R-Net frame aggregation by type/key
-- Taggable R-Net frames
-- Live signal plotting for selected/tagged frames
-- Manual simulation replay from candump/Lua/text sources
-- Synthetic R-Net wheelchair simulation with simulated JSM login and drive frames
-- Optional proprietary ControlCAN hardware integration when the SDK files are present
-- Simulation-first workflow for development without hardware
+- Live CAN frame table with timestamp, channel, direction, ID, DLC and payload
+- Decoded R-Net table with aggregation by R-Net type key
+- Taggable R-Net messages for signal plotting
+- Live signal plot window with accumulated history
+- Simulator menu: select source, start once, start repeat, stop
+- Built-in synthetic R-Net wheelchair/JSM login lab scenario for UI testing
+- Linux SocketCAN capture via `can0` / `can1`
+- CSV/log support for captured CAN frames
 
-## Build modes
+## Safety note
 
-### Simulation-only build
+R-Net is used in powered wheelchair systems. Treat this tool as an analyzer and lab tool. Do not transmit frames on a real wheelchair bus unless you fully understand the electrical, safety and legal consequences. For real hardware analysis, prefer listen-only CAN configuration whenever possible.
 
-The project always builds without the proprietary ControlCAN SDK.
-In this mode, hardware capture is disabled, but the simulation menu can replay `candump`, Lua, or text files containing CAN frame tokens.
+## Repository layout
+
+```text
+.
+├── .github/                 GitHub CI, issue templates and PR template
+├── doc/                     Additional documentation and notes
+├── src/                     Qt/C++ source code
+├── tools/                   Helper scripts
+├── CMakeLists.txt           Top-level Qt/CMake build
+├── README.md                Project overview and setup notes
+├── LICENSE                  GPL-3.0-only for source code
+└── LICENSE.docs             CC BY-NC-SA 4.0 for documentation/analysis text
+```
+
+## Requirements
+
+### QtRNetAnalyzer
+
+- Linux recommended for hardware capture
+- CMake >= 3.21
+- C++20 compiler
+- Qt >= 6.5 with Core and Widgets modules
+- Optional for hardware capture: Linux SocketCAN headers and a working CAN interface
+
+Fedora example:
 
 ```bash
-cmake -S . -B build/Desktop-Debug
-cmake --build build/Desktop-Debug -j"$(nproc)"
-./build/Desktop-Debug/QtRNetAnalyzer
+sudo dnf install -y cmake ninja-build gcc-c++ qt6-qtbase-devel
 ```
 
-### Full ControlCAN hardware build
-
-The full hardware version is enabled automatically only when both the ControlCAN header and library are available.
-Accepted layouts include:
-
-```text
-third_party/controlcan/controlcan.h
-third_party/controlcan/libcontrolcan.so
-
-third_party/ControlCAN/controlcan.h
-third_party/ControlCAN/libControlCAN.so
-
-third_party/controlcan.h
-third_party/libcontrolcan.so
-```
-
-If only `controlcan.h` exists but the library is missing, the build intentionally falls back to simulation-only mode.
-This avoids linker errors such as unresolved references to `VCI_OpenDevice`, `VCI_InitCAN`, `VCI_Receive`, or `VCI_Transmit`.
-
-## Simulation menu
-
-The simulation menu is manual by design:
-
-```text
-Simulation
-├── Select source...
-├── Load R-Net wheelchair simulation (JSM login)
-├── Start once
-├── Start repeat
-└── Stop
-```
-
-No simulation starts automatically.
-Select or load a source first, then start it manually.
-
-## Included R-Net wheelchair simulation
-
-The simulator can replay a synthetic R-Net wheelchair startup and drive sequence.
-The sequence is intended to exercise the analyzer UI, CAN table, R-Net decoder, signal history, and plotting logic.
-
-It includes simulated examples of:
-
-- CAN bus startup/test frames such as `00C#`
-- simulated JSM login/authentication phases
-- simulated parameter/mode frames
-- simulated ready/status frames
-- simulated speed-limit/status frames
-- simulated joystick frames such as `02000300#XxYy`
-- simulated battery/load/heartbeat frames
-
-This is not a real wheelchair startup sequence.
-It is intentionally a laboratory simulation.
-
-## Simulation files
-
-Simulation files are stored below:
-
-```text
-doc/simulations/
-├── README.md
-├── FILES.txt
-├── rnet_wheelchair_jsm_login_drive.candump
-├── controlcan_capture_converted.candump
-├── controlcan_capture_summary.md
-└── controlcan_capture.csv
-```
-
-Typical usage:
-
-```text
-Simulation -> Select source...
-doc/simulations/controlcan_capture_converted.candump
-Simulation -> Start once
-```
-
-Or use the built-in synthetic source:
-
-```text
-Simulation -> Load R-Net wheelchair simulation (JSM login)
-Simulation -> Start once
-```
-
-## RX/TX direction convention
-
-Direction labels are written from the ESP/gateway point of view and are included directly in simulation/replay files:
-
-```text
-RX = App -> ESP command; later real-CAN mode sends this CAN frame
-TX = ESP -> App report; later real-CAN mode received this CAN frame
-```
-
-In short: **RX CAN frames are later sent by the ESP**, and **TX CAN frames are later received/reported back to the app/analyzer**.
-This convention is used consistently in the built-in simulator, replay logs, and generated `.candump` files.
-
-## Relative simulation timing
-
-Simulation and replay timestamps are normalized to the first valid frame.
-The first frame is shown as:
-
-```text
-0.000000 s
-```
-
-All following times are relative to that zero point.
-This makes captures easier to compare regardless of their original absolute timestamp source.
-
-## Candump examples
-
-The analyzer accepts candump-style CAN frame tokens with optional timestamp and RX/TX marker, for example:
-
-```text
-(0.000000) RX can0 00C#
-(0.020000) RX can0 02000100#0000
-(0.030000) RX can0 02000100#0064
-(0.040000) RX can0 02000100#6400
-(0.050000) TX can0 1C0C0300#60
-```
-
-Legacy bare frame tokens are still accepted for quick manual tests:
-
-```text
-00C#
-02000300#0000
-```
-
-For R-Net joystick test traffic, the common synthetic form is:
-
-```text
-02000M00#XxYy
-```
-
-Where:
-
-```text
-M    = simulated device/module slot
-Xx   = signed int8 X axis encoded as one byte
-Yy   = signed int8 Y axis encoded as one byte
-```
-
-## Development workflow
-
-Recommended workflow for this branch:
+Ubuntu/Debian example:
 
 ```bash
+sudo apt update
+sudo apt install -y build-essential cmake ninja-build qt6-base-dev libgl1-mesa-dev
+```
+
+### Hardware driver
+
+For Waveshare USBCAN-B / CANalyst-II compatible devices, install and start the external driver:
+
+```bash
+cd ~/AndroidStudioProjects/waveUSBCAN_b
+sudo ./scripts/install.sh
+sudo systemctl enable --now waveusbcan_b-auto.service
+ip -details link show type can
+```
+
+Expected result: Linux CAN interfaces such as `can0` and `can1` are visible.
+
+## Build
+
+Recommended local build from your project root:
+
+```bash
+cd ~/AndroidStudioProjects/QtRNetAnalyzer
 git checkout chatgpt
-git pull --rebase origin chatgpt
-cmake -S . -B build/Desktop-Debug
+
+cmake -S . -B build/Desktop-Debug -G Ninja -DQTRNET_ENABLE_SOCKETCAN=ON
 cmake --build build/Desktop-Debug -j"$(nproc)"
 ./build/Desktop-Debug/QtRNetAnalyzer
 ```
 
-After changing this README:
+If you do not use Ninja:
 
 ```bash
-git add README.md
-git commit -m "Update README for R-Net wheelchair simulation"
-git push origin chatgpt
+cmake -S . -B build/Desktop-Debug -DQTRNET_ENABLE_SOCKETCAN=ON
+cmake --build build/Desktop-Debug -j"$(nproc)"
+./build/Desktop-Debug/QtRNetAnalyzer
 ```
 
-## Current branch policy
+Simulator-only build:
 
-All generated fixes are based on:
+```bash
+cmake -S . -B build/Desktop-Debug -DQTRNET_ENABLE_SOCKETCAN=OFF
+cmake --build build/Desktop-Debug -j"$(nproc)"
+./build/Desktop-Debug/QtRNetAnalyzer --input candump.txt
+```
+
+## SocketCAN / waveUSBCAN_b usage
+
+QtRNetAnalyzer no longer initializes the USB-CAN adapter directly. It expects SocketCAN interfaces to already exist and to be configured by Linux or by the `waveUSBCAN_b` service.
+
+Interface mapping in the current UI:
 
 ```text
-https://github.com/notwendig/QtRNetAnalyzer/tree/chatgpt
+Device index 0 -> can0 / can1
+Device index 1 -> can2 / can3
 ```
 
-Generated ZIP files should preserve the real project structure and contain only the affected complete files unless a larger project export is explicitly requested.
+R-Net is typically analyzed at 125000 bit/s. A manual listen-only setup can look like this:
+
+```bash
+sudo ip link set can0 down 2>/dev/null || true
+sudo ip link set can0 type can bitrate 125000 restart-ms 100 listen-only on
+sudo ip link set can0 up
+
+sudo ip link set can1 down 2>/dev/null || true
+sudo ip link set can1 type can bitrate 125000 restart-ms 100 listen-only on
+sudo ip link set can1 up
+```
+
+For active lab tests where TX is intentionally required, omit `listen-only on` and use an isolated bench setup.
+
+## Quick hardware smoke test
+
+Before starting QtRNetAnalyzer, verify the driver and interfaces outside the GUI:
+
+```bash
+ip -details link show type can
+candump can0
+```
+
+If `candump` sees frames, QtRNetAnalyzer should also be able to open the corresponding channel.
+
+## Simulation and replay
+
+QtRNetAnalyzer can be used without hardware:
+
+```bash
+./build/Desktop-Debug/QtRNetAnalyzer --input path/to/candump.txt
+```
+
+Inside the GUI, use the Simulation menu:
+
+- Select
+- Load R-Net wheelchair simulation (JSM login)
+- Start (repeat)
+- Start (once)
+- Stop
+
+The built-in wheelchair/JSM scenario is synthetic lab data. It is intended to exercise the UI, aggregation and plotting paths; it is not an authentic R-Net login sequence.
+
+## Troubleshooting
+
+### `SocketCAN interface can0 not found`
+
+The kernel driver has not created the interface, or the interface name is different.
+
+```bash
+sudo systemctl status waveusbcan_b-auto.service
+ip -details link show type can
+```
+
+### `can0 is down`
+
+Bring the interface up before pressing Open in QtRNetAnalyzer:
+
+```bash
+sudo ip link set can0 type can bitrate 125000 restart-ms 100
+sudo ip link set can0 up
+```
+
+### Build fails after old ZIPs or local experiments
+
+Start from the current `chatgpt` branch and rebuild cleanly:
+
+```bash
+cd ~/AndroidStudioProjects/QtRNetAnalyzer
+git checkout chatgpt
+rm -rf build/Desktop-Debug
+cmake -S . -B build/Desktop-Debug -DQTRNET_ENABLE_SOCKETCAN=ON
+cmake --build build/Desktop-Debug -j"$(nproc)"
+```
+
+### Old ControlCAN or submodule files are still visible
+
+The active SocketCAN path does not need proprietary ControlCAN SDK files and does not need the old `waveshares_USBCAN_B` userspace submodule. If those files are still tracked locally and you want a clean SocketCAN-only branch, remove them explicitly:
+
+```bash
+git rm -f .gitmodules third_party/waveshares_USBCAN_B 2>/dev/null || true
+rm -rf .git/modules/third_party/waveshares_USBCAN_B
+```
+
+## GitHub CI
+
+The repository contains a GitHub Actions workflow under `.github/workflows/ci.yml`. It performs a Linux Qt6/CMake build for pushes and pull requests against `main` and `chatgpt`.
+
+## Licensing
+
+Source code is licensed under GPL-3.0-only. See `LICENSE`.
+
+Documentation, protocol notes and analysis text are licensed under CC BY-NC-SA 4.0. See `LICENSE.docs`.
+
+Third-party drivers, vendor SDKs, datasheets and hardware documentation belong to their respective owners and should only be redistributed when their license allows it.
+
+## Authors / credits
+
+- Jürgen Willi Sievers, JSievers@NadiSoft.de
+- ChatGPT-assisted development and analysis
