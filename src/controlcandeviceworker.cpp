@@ -2,6 +2,15 @@
 
 #include <QDateTime>
 #include <QMutexLocker>
+#include <QAction>
+#include <QActionGroup>
+#include <QMenu>
+#include <QMenuBar>
+#include <QMainWindow>
+#include <QVariant>
+
+#include <QCanBus>
+#include <QCanBusDeviceInfo>
 
 #include <algorithm>
 #include <cerrno>
@@ -37,11 +46,215 @@ void closeFd(int &fd)
 ControlCanDeviceWorker::ControlCanDeviceWorker(QObject *parent)
     : QThread(parent)
 {
+    installDeviceMenu(parent);
 }
 
 ControlCanDeviceWorker::~ControlCanDeviceWorker()
 {
     closeDevice();
+}
+
+
+void ControlCanDeviceWorker::installDeviceMenu(QObject *parentObject)
+{
+    auto *window = qobject_cast<QMainWindow *>(parentObject);
+    if (!window) {
+        return;
+    }
+
+    m_deviceMenu = window->menuBar()->addMenu(QStringLiteral("&Device"));
+    refreshDeviceMenu();
+}
+
+QStringList ControlCanDeviceWorker::availableSocketCanInterfaces(QString *errorMessage) const
+{
+    QStringList interfaces;
+
+#if !QTRA_HAS_SOCKETCAN
+    if (errorMessage) {
+        *errorMessage = QStringLiteral("SocketCAN backend is disabled in this build.");
+    }
+    return interfaces;
+#else
+    QCanBus *bus = QCanBus::instance();
+    if (!bus) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("QCanBus singleton is unavailable.");
+        }
+        return interfaces;
+    }
+
+    const QStringList plugins = bus->plugins();
+    if (!plugins.contains(QStringLiteral("socketcan"))) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Qt SocketCAN plugin not found. Install Qt6 SerialBus/socketcan plugin support.");
+        }
+        return interfaces;
+    }
+
+    QString qtError;
+    const QList<QCanBusDeviceInfo> devices = bus->availableDevices(QStringLiteral("socketcan"), &qtError);
+    for (const QCanBusDeviceInfo &device : devices) {
+        const QString name = device.name().trimmed();
+        if (!name.isEmpty() && !interfaces.contains(name)) {
+            interfaces.push_back(name);
+        }
+    }
+
+    interfaces.sort(Qt::CaseInsensitive);
+
+    if (interfaces.isEmpty() && !qtError.isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = qtError;
+        }
+    }
+
+    return interfaces;
+#endif
+}
+
+QString ControlCanDeviceWorker::deviceSelectionText(const QStringList &interfaces) const
+{
+    if (interfaces.isEmpty()) {
+        return QStringLiteral("Auto by device index pair (can0/can1, can2/can3, ...)");
+    }
+
+    if (interfaces.size() == 1) {
+        return QStringLiteral("CAN1=%1, CAN2 disabled").arg(interfaces.at(0));
+    }
+
+    return QStringLiteral("CAN1=%1, CAN2=%2").arg(interfaces.at(0), interfaces.at(1));
+}
+
+void ControlCanDeviceWorker::addDeviceSelectionAction(QMenu *menu,
+                                                      QActionGroup *group,
+                                                      const QString &label,
+                                                      const QStringList &interfaces,
+                                                      bool checked)
+{
+    if (!menu || !group) {
+        return;
+    }
+
+    QAction *action = menu->addAction(label);
+    action->setCheckable(true);
+    action->setChecked(checked);
+    action->setData(QVariant::fromValue(interfaces));
+    group->addAction(action);
+    connect(action, &QAction::triggered, this, &ControlCanDeviceWorker::selectDeviceInterfaces);
+}
+
+void ControlCanDeviceWorker::refreshDeviceMenu()
+{
+    if (!m_deviceMenu) {
+        return;
+    }
+
+    if (m_deviceActionGroup) {
+        delete m_deviceActionGroup;
+        m_deviceActionGroup = nullptr;
+    }
+
+    m_deviceMenu->clear();
+
+    QAction *refreshAction = m_deviceMenu->addAction(QStringLiteral("Refresh SocketCAN devices"));
+    connect(refreshAction, &QAction::triggered, this, &ControlCanDeviceWorker::refreshDeviceMenu);
+    m_deviceMenu->addSeparator();
+
+    m_deviceActionGroup = new QActionGroup(m_deviceMenu);
+    m_deviceActionGroup->setExclusive(true);
+
+    addDeviceSelectionAction(m_deviceMenu,
+                             m_deviceActionGroup,
+                             QStringLiteral("Auto: device index pair (can0/can1, can2/can3, ...)"),
+                             QStringList{},
+                             m_selectedInterfaces.isEmpty());
+
+    QString error;
+    const QStringList interfaces = availableSocketCanInterfaces(&error);
+
+    if (!interfaces.isEmpty()) {
+        m_deviceMenu->addSeparator();
+        m_deviceMenu->addSection(QStringLiteral("Detected SocketCAN devices"));
+
+        QStringList addedPairKeys;
+        for (const QString &name : interfaces) {
+            if (!name.startsWith(QStringLiteral("can"))) {
+                continue;
+            }
+
+            bool ok = false;
+            const int number = name.mid(3).toInt(&ok);
+            if (!ok || (number % 2) != 0) {
+                continue;
+            }
+
+            const QString second = QStringLiteral("can%1").arg(number + 1);
+            if (!interfaces.contains(second)) {
+                continue;
+            }
+
+            const QStringList pair{name, second};
+            const QString key = pair.join(QLatin1Char('|'));
+            if (addedPairKeys.contains(key)) {
+                continue;
+            }
+            addedPairKeys.push_back(key);
+
+            addDeviceSelectionAction(m_deviceMenu,
+                                     m_deviceActionGroup,
+                                     QStringLiteral("waveUSBCAN_b pair: CAN1=%1, CAN2=%2").arg(name, second),
+                                     pair,
+                                     m_selectedInterfaces == pair);
+        }
+
+        if (addedPairKeys.isEmpty() && interfaces.size() >= 2) {
+            const QStringList pair{interfaces.at(0), interfaces.at(1)};
+            addDeviceSelectionAction(m_deviceMenu,
+                                     m_deviceActionGroup,
+                                     QStringLiteral("Pair: CAN1=%1, CAN2=%2").arg(pair.at(0), pair.at(1)),
+                                     pair,
+                                     m_selectedInterfaces == pair);
+        }
+
+        m_deviceMenu->addSeparator();
+        for (const QString &name : interfaces) {
+            const QStringList single{name};
+            addDeviceSelectionAction(m_deviceMenu,
+                                     m_deviceActionGroup,
+                                     QStringLiteral("Single channel: CAN1=%1").arg(name),
+                                     single,
+                                     m_selectedInterfaces == single);
+        }
+    } else {
+        QAction *emptyAction = m_deviceMenu->addAction(
+            error.isEmpty()
+                ? QStringLiteral("No SocketCAN devices detected")
+                : QStringLiteral("No SocketCAN devices detected: %1").arg(error));
+        emptyAction->setEnabled(false);
+    }
+
+    m_deviceMenu->addSeparator();
+    QAction *hintAction = m_deviceMenu->addAction(QStringLiteral("Hint: install/run waveUSBCAN_b, then refresh"));
+    hintAction->setEnabled(false);
+}
+
+void ControlCanDeviceWorker::selectDeviceInterfaces()
+{
+    auto *action = qobject_cast<QAction *>(sender());
+    if (!action) {
+        return;
+    }
+
+    const QStringList interfaces = action->data().toStringList();
+    {
+        QMutexLocker locker(&m_mutex);
+        m_selectedInterfaces = interfaces;
+    }
+
+    emit statusMessage(QStringLiteral("Device selection: %1. Close and open capture to apply if already running.")
+                           .arg(deviceSelectionText(interfaces)),
+                       false);
 }
 
 QString ControlCanDeviceWorker::resultToString(long result) const
@@ -56,8 +269,16 @@ QString ControlCanDeviceWorker::resultToString(long result) const
 
 QString ControlCanDeviceWorker::interfaceNameForChannel(const ChannelConfig &cfg) const
 {
+    const int channelIndex = static_cast<int>(cfg.canIndex);
+    if (channelIndex >= 0 && channelIndex < m_activeInterfaces.size()) {
+        const QString selected = m_activeInterfaces.at(channelIndex).trimmed();
+        if (!selected.isEmpty()) {
+            return selected;
+        }
+    }
+
     const int base = static_cast<int>(m_config.deviceIndex) * kChannelCount;
-    return QStringLiteral("can%1").arg(base + static_cast<int>(cfg.canIndex));
+    return QStringLiteral("can%1").arg(base + channelIndex);
 }
 
 int ControlCanDeviceWorker::bitrateFromTiming(UCHAR timing0, UCHAR timing1) const
@@ -209,6 +430,18 @@ bool ControlCanDeviceWorker::openDevice(const DeviceOpenConfig &config, QString 
         }
 
         m_config = config;
+        m_activeInterfaces = m_selectedInterfaces;
+        if (!m_activeInterfaces.isEmpty()) {
+            m_config.deviceIndex = 0;
+            m_config.channel0.canIndex = 0;
+            if (m_activeInterfaces.at(0).trimmed().isEmpty()) {
+                m_config.channel0.enabled = false;
+            }
+            m_config.channel1.canIndex = 1;
+            if (m_activeInterfaces.size() < 2 || m_activeInterfaces.at(1).trimmed().isEmpty()) {
+                m_config.channel1.enabled = false;
+            }
+        }
         m_rx0 = m_rx1 = m_tx0 = m_tx1 = m_err0 = m_err1 = 0;
         m_txQueue.clear();
         m_channels = {};
@@ -242,7 +475,7 @@ bool ControlCanDeviceWorker::openDevice(const DeviceOpenConfig &config, QString 
 
     start();
 
-    emit statusMessage(QStringLiteral("SocketCAN capture opened. QtRNetAnalyzer now uses can0/can1 from waveUSBCAN_b, not ControlCAN."), false);
+    emit statusMessage(QStringLiteral("SocketCAN capture opened: %1").arg(deviceSelectionText(m_activeInterfaces)), false);
     emit statusMessage(QStringLiteral("Bitrate and listen-only mode are configured by Linux `ip link`/waveUSBCAN_b, not by the Qt UI."), false);
     emit deviceStateChanged(true);
     return true;
@@ -274,6 +507,7 @@ void ControlCanDeviceWorker::closeDevice()
     {
         QMutexLocker locker(&m_mutex);
         m_open = false;
+        m_activeInterfaces.clear();
         m_txQueue.clear();
     }
 

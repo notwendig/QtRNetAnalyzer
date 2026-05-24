@@ -40,3 +40,13 @@ candump can0
 ```
 
 If this works, the Qt application should be able to capture from the same interface.
+
+## Qt Device menu
+
+The application has a **Device** menu that enumerates SocketCAN interfaces through Qt SerialBus/QCanBus. Typical selections are:
+
+- `waveUSBCAN_b pair: CAN1=can0, CAN2=can1` for the normal dual-channel adapter.
+- `Single channel: CAN1=can0` for one-channel analysis or `vcan0` testing.
+- `Auto` to keep the numeric device-index mapping.
+
+Refresh the menu after the kernel driver creates or removes interfaces.

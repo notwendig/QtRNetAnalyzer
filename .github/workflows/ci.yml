@@ -31,6 +31,8 @@ jobs:
             ninja-build \
             qt6-base-dev \
             libgl1-mesa-dev
+          sudo apt-get install -y qt6-serialbus-dev || \
+            sudo apt-get install -y libqt6serialbus6-dev libqt6serialbus6-plugins
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DQTRNET_ENABLE_SOCKETCAN=ON -DCMAKE_BUILD_TYPE=Debug

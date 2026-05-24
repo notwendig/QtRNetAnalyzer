@@ -48,13 +48,13 @@ R-Net is used in powered wheelchair systems. Treat this tool as an analyzer and 
 - Linux recommended for hardware capture
 - CMake >= 3.21
 - C++20 compiler
-- Qt >= 6.5 with Core and Widgets modules
-- Optional for hardware capture: Linux SocketCAN headers and a working CAN interface
+- Qt >= 6.5 with Core, Widgets and SerialBus modules
+- Optional for hardware capture: Linux SocketCAN headers, Qt SocketCAN plugin and a working CAN interface
 
 Fedora example:
 
 ```bash
-sudo dnf install -y cmake ninja-build gcc-c++ qt6-qtbase-devel
+sudo dnf install -y cmake ninja-build gcc-c++ qt6-qtbase-devel qt6-qtserialbus-devel
 ```
 
 Ubuntu/Debian example:
@@ -62,6 +62,7 @@ Ubuntu/Debian example:
 ```bash
 sudo apt update
 sudo apt install -y build-essential cmake ninja-build qt6-base-dev libgl1-mesa-dev
+sudo apt install -y qt6-serialbus-dev || sudo apt install -y libqt6serialbus6-dev libqt6serialbus6-plugins
 ```
 
 ### Hardware driver
@@ -76,6 +77,19 @@ ip -details link show type can
 ```
 
 Expected result: Linux CAN interfaces such as `can0` and `can1` are visible.
+
+
+### Device selection menu
+
+QtRNetAnalyzer now adds a **Device** menu at startup. It uses Qt SerialBus/QCanBus to ask the Qt SocketCAN plugin for currently available CAN interfaces and offers:
+
+- **Auto**: legacy index mapping, for example device index `0` => `can0`/`can1`.
+- **waveUSBCAN_b pair**: detected two-channel pairs such as `can0` + `can1`.
+- **Single channel**: open only one detected SocketCAN interface as CAN1.
+
+Use **Device -> Refresh SocketCAN devices** after plugging in the adapter or after running `sudo ./scripts/install.sh` in `waveUSBCAN_b`. The menu changes the next capture open; if capture is already running, close and open again.
+
+Internally this uses `QCanBus::availableDevices("socketcan")`. Qt loads the SocketCAN CAN-bus plugin through its QCanBusFactory plugin mechanism; QtRNetAnalyzer does not implement a custom CAN plugin.
 
 ## Build
 

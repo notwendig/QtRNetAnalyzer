@@ -1,3 +1,9 @@
+
+## Unreleased
+
+- Added Qt SerialBus/QCanBus based Device menu for SocketCAN interface selection.
+- Linked QtRNetAnalyzer against Qt6::SerialBus so Qt's SocketCAN plugin/factory can enumerate available CAN devices.
+
 # Changelog
 
 ## Unreleased
