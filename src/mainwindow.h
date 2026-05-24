@@ -141,3 +141,9 @@ private:
     quint64 m_displayedFrames = 0;
     qint64 m_statusLogBaseMs = -1;
 };
+
+#include "deferredcsvfiledialog.h"
+
+#ifndef QTRNETANALYZER_USE_REAL_QFILEDIALOG_IN_MAINWINDOW_CPP
+#define QFileDialog QtraDeferredCsvFileDialog
+#endif

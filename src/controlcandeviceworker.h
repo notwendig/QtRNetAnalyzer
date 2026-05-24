@@ -6,6 +6,7 @@
 #include <QThread>
 #include <QVector>
 #include <QWaitCondition>
+#include <QStringList>
 
 #include <array>
 
@@ -45,6 +46,11 @@ struct DeviceOpenConfig
 struct can_frame;
 #endif
 
+QT_BEGIN_NAMESPACE
+class QActionGroup;
+class QMenu;
+QT_END_NAMESPACE
+
 class ControlCanDeviceWorker final : public QThread
 {
     Q_OBJECT
@@ -72,6 +78,10 @@ signals:
 protected:
     void run() override;
 
+private slots:
+    void refreshDeviceMenu();
+    void selectDeviceInterfaces();
+
 private:
     struct RuntimeChannel
     {
@@ -88,6 +98,15 @@ private:
     void closeAllSockets();
     QString interfaceNameForChannel(const ChannelConfig &cfg) const;
     int bitrateFromTiming(UCHAR timing0, UCHAR timing1) const;
+
+    void installDeviceMenu(QObject *parentObject);
+    QStringList availableSocketCanInterfaces(QString *errorMessage) const;
+    void addDeviceSelectionAction(QMenu *menu,
+                                  QActionGroup *group,
+                                  const QString &label,
+                                  const QStringList &interfaces,
+                                  bool checked);
+    QString deviceSelectionText(const QStringList &interfaces) const;
 
 #if QTRA_HAS_SOCKETCAN
     CanFrame toFrame(const can_frame &socketFrame, int channel, direction_t direction) const;
@@ -106,4 +125,9 @@ private:
     quint64 m_tx1 = 0;
     quint64 m_err0 = 0;
     quint64 m_err1 = 0;
+
+    QMenu *m_deviceMenu = nullptr;
+    QActionGroup *m_deviceActionGroup = nullptr;
+    QStringList m_selectedInterfaces;
+    QStringList m_activeInterfaces;
 };

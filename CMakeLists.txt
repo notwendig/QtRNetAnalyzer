@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets SerialBus)
 qt_standard_project_setup()
 
 option(QTRNET_ENABLE_SOCKETCAN "Enable Linux SocketCAN hardware capture backend" ON)
@@ -57,6 +57,7 @@ target_include_directories(QtRNetAnalyzer PRIVATE
 target_link_libraries(QtRNetAnalyzer PRIVATE
     Qt6::Core
     Qt6::Widgets
+    Qt6::SerialBus
 )
 
 if(QTRNET_ENABLE_SOCKETCAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux")

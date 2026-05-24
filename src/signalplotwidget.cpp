@@ -1,13 +1,10 @@
 #include "signalplotwidget.h"
 
-#include <QEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QToolTip>
-
 #include <QtMath>
-#include <limits>
 
 QColor SignalPlotWidget::colorForSignalKey(quint64 key)
 {
@@ -33,7 +30,6 @@ void SignalPlotWidget::setPaused(bool paused)
 {
     if (m_paused == paused)
         return;
-
     m_paused = paused;
     emit pauseChanged(m_paused);
     update();
@@ -50,7 +46,6 @@ void SignalPlotWidget::refreshView()
 {
     if (!m_paused && !m_hasManualZoom)
         updateLiveWindow();
-
     update();
 }
 
@@ -69,6 +64,15 @@ void SignalPlotWidget::paintEvent(QPaintEvent *)
     }
 
     drawTimeAxis(painter, plot);
+
+    if (!hasDrawableSamplesInView()) {
+        painter.setPen(QColor(180, 180, 180));
+        painter.drawText(plot, Qt::AlignCenter,
+                         QStringLiteral("No checked plottable signal in the visible time range"));
+        drawLegend(painter, plot);
+        return;
+    }
+
     drawSignals(painter, plot);
     drawSelection(painter, plot);
     drawCrosshair(painter, plot);
@@ -186,9 +190,27 @@ void SignalPlotWidget::updateLiveWindow()
 
     m_viewEnd = m_model->maxTime();
     m_viewStart = qMax(m_model->minTime(), m_viewEnd - m_liveWindowSec);
-
     if (qFuzzyCompare(m_viewStart, m_viewEnd))
         m_viewEnd = m_viewStart + 1.0;
+}
+
+bool SignalPlotWidget::hasDrawableSamplesInView() const
+{
+    if (!m_model)
+        return false;
+
+    for (auto it = m_model->allSignals().constBegin(); it != m_model->allSignals().constEnd(); ++it) {
+        const SignalHistory &history = it.value();
+        if (!history.enabled || !history.plottable)
+            continue;
+
+        for (const SignalSample &sample : history.samples) {
+            if (sample.timeSec >= m_viewStart && sample.timeSec <= m_viewEnd)
+                return true;
+        }
+    }
+
+    return false;
 }
 
 void SignalPlotWidget::calculateVisibleRange(double *minValue, double *maxValue) const
@@ -200,7 +222,7 @@ void SignalPlotWidget::calculateVisibleRange(double *minValue, double *maxValue)
     if (m_model) {
         for (auto it = m_model->allSignals().constBegin(); it != m_model->allSignals().constEnd(); ++it) {
             const SignalHistory &history = it.value();
-            if (!history.enabled)
+            if (!history.enabled || !history.plottable)
                 continue;
 
             for (const SignalSample &sample : history.samples) {
@@ -248,8 +270,8 @@ void SignalPlotWidget::drawTimeAxis(QPainter &painter, const QRect &plot) const
     const double span = qMax(0.001, m_viewEnd - m_viewStart);
     const double rawStep = span / 8.0;
     const double magnitude = qPow(10.0, qFloor(qLn(rawStep) / qLn(10.0)));
-
     double step = magnitude;
+
     if (rawStep / magnitude > 5.0)
         step = 10.0 * magnitude;
     else if (rawStep / magnitude > 2.0)
@@ -264,7 +286,8 @@ void SignalPlotWidget::drawTimeAxis(QPainter &painter, const QRect &plot) const
         painter.drawLine(x, plot.top(), x, plot.bottom());
         painter.setPen(QColor(150, 155, 165));
         painter.drawLine(x, plot.bottom(), x, plot.bottom() + 5);
-        painter.drawText(x + 3, plot.bottom() + 20, QStringLiteral("%1 s").arg(t, 0, 'f', span < 2.0 ? 3 : 2));
+        painter.drawText(x + 3, plot.bottom() + 20,
+                         QStringLiteral("%1 s").arg(t, 0, 'f', span < 2.0 ? 3 : 2));
     }
 }
 
@@ -278,7 +301,7 @@ void SignalPlotWidget::drawSignals(QPainter &painter, const QRect &plot) const
 
     for (auto it = m_model->allSignals().constBegin(); it != m_model->allSignals().constEnd(); ++it) {
         const SignalHistory &history = it.value();
-        if (!history.enabled || history.samples.isEmpty())
+        if (!history.enabled || !history.plottable || history.samples.isEmpty())
             continue;
 
         const QColor color = colorForSignalKey(it.key());
@@ -301,34 +324,29 @@ void SignalPlotWidget::drawSignals(QPainter &painter, const QRect &plot) const
         QPainterPath path;
         bool started = false;
         QPointF lastPoint;
-
         for (int n = 0; n < visibleIndexes.size(); n += stride) {
             const SignalSample &sample = history.samples.at(visibleIndexes.at(n));
             const QPointF point(timeToX(sample.timeSec), valueToY(sample.value, minValue, maxValue));
-
             if (!started) {
                 path.moveTo(point);
                 started = true;
             } else {
                 path.lineTo(point);
             }
-
             lastPoint = point;
         }
 
         // Always include the last visible sample so repeated zooming does not
         // silently drop the end of the visible curve because of stride rounding.
-        if (!visibleIndexes.isEmpty()) {
-            const SignalSample &sample = history.samples.at(visibleIndexes.last());
-            const QPointF point(timeToX(sample.timeSec), valueToY(sample.value, minValue, maxValue));
-            if (!started) {
-                path.moveTo(point);
-                started = true;
-            } else if (point != lastPoint) {
-                path.lineTo(point);
-            }
-            lastPoint = point;
+        const SignalSample &sample = history.samples.at(visibleIndexes.last());
+        const QPointF point(timeToX(sample.timeSec), valueToY(sample.value, minValue, maxValue));
+        if (!started) {
+            path.moveTo(point);
+            started = true;
+        } else if (point != lastPoint) {
+            path.lineTo(point);
         }
+        lastPoint = point;
 
         if (started) {
             painter.drawPath(path);
@@ -361,20 +379,19 @@ void SignalPlotWidget::drawCrosshair(QPainter &painter, const QRect &plot) const
 
     painter.setPen(QPen(QColor(255, 220, 80), 1, Qt::DashLine));
     painter.drawLine(m_mousePos.x(), plot.top(), m_mousePos.x(), plot.bottom());
-
     painter.setPen(QColor(255, 235, 120));
-    painter.drawText(m_mousePos.x() + 8, plot.top() + 18, QStringLiteral("t=%1 s").arg(xToTime(m_mousePos.x()), 0, 'f', 3));
+    painter.drawText(m_mousePos.x() + 8, plot.top() + 18,
+                     QStringLiteral("t=%1 s").arg(xToTime(m_mousePos.x()), 0, 'f', 3));
 }
 
 void SignalPlotWidget::drawLegend(QPainter &painter, const QRect &plot) const
 {
     Q_UNUSED(plot)
-
     painter.setPen(m_paused ? QColor(255, 190, 80) : QColor(120, 220, 120));
     painter.drawText(width() - 150, 22, m_paused ? QStringLiteral("PAUSED") : QStringLiteral("LIVE"));
-
     painter.setPen(QColor(150, 155, 165));
-    painter.drawText(width() - 260, height() - 8, QStringLiteral("Drag: zoom | Click: pause/live | Right click: reset"));
+    painter.drawText(width() - 260, height() - 8,
+                     QStringLiteral("Drag: zoom | Click: pause/live | Right click: reset"));
 }
 
 QString SignalPlotWidget::cursorText(double timeSec) const
