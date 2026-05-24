@@ -174,6 +174,13 @@ Inside the GUI, use the Simulation menu:
 
 The built-in wheelchair/JSM scenario is synthetic lab data. It is intended to exercise the UI, aggregation and plotting paths; it is not an authentic R-Net login sequence.
 
+
+## Open R-Net protocol attribution
+
+The R-Net decoder is extended with a table-based set of known CAN frame families derived from the public Open R-Net research by Stephen Chavez and Specter. See `doc/open_rnet_decoder_attribution.md` for source, license and safety notes.
+
+The imported knowledge covers additional serial/authentication, POP Quick, POP segmented/config-transfer, Bluetooth module, cJSM, lamp/status and partially decoded diagnostic frame families. The integration is decode-only; it does not add new transmit automation.
+
 ## Troubleshooting
 
 ### `SocketCAN interface can0 not found`

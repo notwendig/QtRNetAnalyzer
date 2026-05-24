@@ -15,14 +15,20 @@ struct SignalHistory
     QString name;
     QString unit;
     QVector<SignalSample> samples;
+
+    // User-visible checkbox state in the Signal View tree.
     bool enabled = true;
+
+    // False for display-only metadata such as the per-frame counter.
+    // Metadata is kept in the tree/value column but is excluded from the plot
+    // and from auto-scaling so it cannot crush real signals such as joystick X/Y.
+    bool plottable = true;
 };
 
 class SignalHistoryModel
 {
 public:
     void clear();
-
     void addSample(const SignalSample &sample);
     void addSamplesFromFrame(quint64 sourceKey, const QString &sourceName, const CanFrame &frame);
     void removeSource(quint64 sourceKey);
@@ -42,11 +48,13 @@ private:
     static qint8 s8(const QByteArray &data, int index);
     static quint16 le16(const QByteArray &data, int index);
     static quint32 le32(const QByteArray &data, int index);
-    static double frameTimeSec(const CanFrame &frame);
+
+    double frameTimeSec(const CanFrame &frame);
     static quint64 makeSignalKey(quint64 sourceKey, quint16 parameterIndex);
 
-    void addFrameCounterSample(quint64 sourceKey, const QString &sourceName, const CanFrame &frame);
-    void addPayloadByteSamples(quint64 sourceKey, const QString &sourceName, const CanFrame &frame);
+    void addSampleInternal(const SignalSample &sample, bool enabledByDefault, bool plottable);
+    void addFrameCounterSample(quint64 sourceKey, const QString &sourceName, double timeSec);
+    void addPayloadByteSamples(quint64 sourceKey, const QString &sourceName, const CanFrame &frame, double timeSec);
     void recomputeTimeRange();
 
     static constexpr int kMaxSamplesPerSignal = 20000;
@@ -55,8 +63,10 @@ private:
     QHash<quint64, SignalHistory> m_signals;
     QHash<quint64, QString> m_sourceNames;
     QHash<quint64, quint64> m_sourceCounts;
-
     double m_minTime = 0.0;
     double m_maxTime = 0.0;
     bool m_hasTime = false;
+
+    double m_fallbackBaseSec = -1.0;
+    double m_lastFallbackTimeSec = -1.0;
 };

@@ -7,6 +7,11 @@
 #include <QString>
 #include <QWidget>
 
+class QEvent;
+class QMouseEvent;
+class QPaintEvent;
+class QPainter;
+
 class SignalPlotWidget final : public QWidget
 {
     Q_OBJECT
@@ -17,6 +22,7 @@ public:
     void setModel(SignalHistoryModel *model);
     void setPaused(bool paused);
     bool isPaused() const { return m_paused; }
+
     static QColor colorForSignalKey(quint64 key);
 
 public slots:
@@ -42,7 +48,9 @@ private:
     int valueToY(double value, double minValue, double maxValue) const;
 
     void updateLiveWindow();
+    bool hasDrawableSamplesInView() const;
     void calculateVisibleRange(double *minValue, double *maxValue) const;
+
     void drawBackground(QPainter &painter, const QRect &plot) const;
     void drawTimeAxis(QPainter &painter, const QRect &plot) const;
     void drawSignals(QPainter &painter, const QRect &plot) const;
@@ -53,18 +61,14 @@ private:
 
 private:
     SignalHistoryModel *m_model = nullptr;
-
     double m_viewStart = 0.0;
     double m_viewEnd = 10.0;
     double m_liveWindowSec = 30.0;
-
     bool m_paused = false;
     bool m_hasManualZoom = false;
-
     bool m_selecting = false;
     QPoint m_selectionStart;
     QPoint m_selectionEnd;
-
     bool m_mouseInside = false;
     QPoint m_mousePos;
 };
