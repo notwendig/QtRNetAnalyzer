@@ -2,14 +2,13 @@
 
 #include "liveframedelegate.h"
 #include "rnetframedelegate.h"
+#include "rnetwheelchairsimulator.h"
 
 #include <QAbstractItemView>
 #include <QAction>
-#include <QAbstractTableModel>
+#include <QByteArray>
 #include <QCheckBox>
-#include <QColor>
 #include <QComboBox>
-#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -19,27 +18,32 @@
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QHBoxLayout>
-#include <QHash>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMainWindow>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
-#include <QSpinBox>
 #include <QSortFilterProxyModel>
+#include <QSpinBox>
 #include <QStatusBar>
-#include <QTableView>
+#include <QStringList>
 #include <QTabWidget>
+#include <QTableView>
 #include <QTextStream>
 #include <QTimer>
+#include <QtGlobal>
 #include <QVBoxLayout>
 
-namespace {
+#include <utility>
 
-struct BitrateItem {
+namespace
+{
+struct BitrateItem
+{
     const char *label;
     UCHAR t0;
     UCHAR t1;
@@ -52,15 +56,65 @@ constexpr BitrateItem kBitrates[] = {
     {"125 kbit/s (R-Net)", 0x03, 0x1C},
     {"100 kbit/s", 0x04, 0x1C},
     {"50 kbit/s", 0x09, 0x1C},
-    };
+};
 
 QString formatFrameTypeLocal(const CanFrame &frame)
 {
     return QStringLiteral("%1/%2")
-    .arg(frame.extended ? QStringLiteral("EXT") : QStringLiteral("STD"))
+        .arg(frame.extended ? QStringLiteral("EXT") : QStringLiteral("STD"))
         .arg(frame.remote ? QStringLiteral("RTR") : QStringLiteral("DATA"));
 }
 
+bool extractCandumpTimestampUs(const QString &line, quint32 *timestampUs)
+{
+    if (!timestampUs)
+        return false;
+
+    const QString trimmed = line.trimmed();
+    if (!trimmed.startsWith('('))
+        return false;
+
+    const int closePos = trimmed.indexOf(')');
+    if (closePos <= 1)
+        return false;
+
+    bool ok = false;
+    const double seconds = trimmed.mid(1, closePos - 1).toDouble(&ok);
+    if (!ok || seconds < 0.0)
+        return false;
+
+    const qint64 microseconds = qRound64(seconds * 1000000.0);
+    if (microseconds < 0 || microseconds > 0xFFFFFFFFll)
+        return false;
+
+    *timestampUs = static_cast<quint32>(microseconds);
+    return true;
+}
+
+direction_t detectSimulationDirection(const QString &line)
+{
+    const QString upper = line.toUpper();
+
+    // Direction is defined from the ESP/gateway point of view:
+    //   RX = App -> ESP command; later real-CAN mode sends this CAN frame.
+    //   TX = ESP -> App report; later real-CAN mode received this CAN frame.
+    if (upper.contains(QStringLiteral("ESP->APP")) || upper.contains(QStringLiteral("ESP=>APP")) ||
+        upper.contains(QStringLiteral("ESP TO APP")) || upper.contains(QStringLiteral("ESP→APP")))
+        return dir_tx;
+
+    if (upper.contains(QStringLiteral("APP->ESP")) || upper.contains(QStringLiteral("APP=>ESP")) ||
+        upper.contains(QStringLiteral("APP TO ESP")) || upper.contains(QStringLiteral("APP→ESP")))
+        return dir_rx;
+
+    static const QRegularExpression txToken(QStringLiteral("\\bTX\\b"));
+    static const QRegularExpression rxToken(QStringLiteral("\\bRX\\b"));
+    if (txToken.match(upper).hasMatch())
+        return dir_tx;
+    if (rxToken.match(upper).hasMatch())
+        return dir_rx;
+
+    return dir_rx;
+}
 } // namespace
 
 MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
@@ -69,11 +123,13 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
     , m_simulationMode(!inputFile.trimmed().isEmpty())
     , m_worker(new ControlCanDeviceWorker(this))
 {
-    setWindowTitle(QStringLiteral("Qt6 ControlCAN Analyzer Pro"));
+    setWindowTitle(QStringLiteral("QtRNetAnalyzer"));
     resize(1400, 900);
+
     m_simulationTimer = new QTimer(this);
     m_simulationTimer->setInterval(10);
     connect(m_simulationTimer, &QTimer::timeout, this, &MainWindow::replaySimulationTick);
+
     createSimulationMenu();
     setCentralWidget(createCentral());
 
@@ -90,37 +146,42 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
 
     m_liveView->setModel(m_liveProxy);
     m_liveView->setItemDelegate(new LiveFrameDelegate(m_liveView));
+
     m_rnetView->setModel(m_rnetProxy);
     m_rnetView->setItemDelegate(new RNetFrameDelegate(m_rnetView));
 
-    connect(m_rnetModel, &RNetFrameModel::tagStateChanged, this, [this](quint64 key, const QString &name, bool enabled) {
-        if (!m_signalView)
-            return;
+    connect(m_rnetModel,
+            &RNetFrameModel::tagStateChanged,
+            this,
+            [this](quint64 key, const QString &name, bool enabled) {
+                if (!m_signalView)
+                    return;
+                if (!enabled) {
+                    m_taggedSignalSources.remove(key);
+                    m_signalView->removeSource(key);
+                    updateSignalViewAvailability();
+                    return;
+                }
 
-        if (!enabled) {
-            m_taggedSignalSources.remove(key);
-            m_signalView->removeSource(key);
-            updateSignalViewAvailability();
-            return;
-        }
+                m_taggedSignalSources.insert(key);
+                updateSignalViewAvailability();
 
-        m_taggedSignalSources.insert(key);
-        updateSignalViewAvailability();
+                const auto *history = m_rnetModel->historyForKey(key);
+                if (!history)
+                    return;
+                for (const auto &entry : *history) {
+                    if (entry)
+                        m_signalView->addFrame(key, name, *entry);
+                }
+            });
 
-        const auto *history = m_rnetModel->historyForKey(key);
-        if (!history)
-            return;
-
-        for (const auto &entry : *history) {
-            if (entry)
-                m_signalView->addFrame(key, name, *entry);
-        }
-    });
-
-    connect(m_rnetModel, &RNetFrameModel::taggedFrameReceived, this, [this](quint64 key, const QString &name, const CanFrame &frame) {
-        if (m_signalView)
-            m_signalView->addFrame(key, name, frame);
-    });
+    connect(m_rnetModel,
+            &RNetFrameModel::taggedFrameReceived,
+            this,
+            [this](quint64 key, const QString &name, const CanFrame &frame) {
+                if (m_signalView)
+                    m_signalView->addFrame(key, name, frame);
+            });
 
     connect(m_openBtn, &QPushButton::clicked, this, &MainWindow::openDevice);
     connect(m_closeBtn, &QPushButton::clicked, this, &MainWindow::closeDevice);
@@ -142,7 +203,6 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
         m_openBtn->setEnabled(false);
         m_closeBtn->setEnabled(false);
         m_sendBtn->setEnabled(false);
-
         QString error;
         if (!loadSimulationFile(m_inputFile, &error)) {
             QMessageBox::warning(this, QStringLiteral("Simulation source"), error);
@@ -169,22 +229,24 @@ MainWindow::~MainWindow()
 void MainWindow::createSimulationMenu()
 {
     auto *menu = menuBar()->addMenu(QStringLiteral("&Simulation"));
-
     m_simSelectAction = menu->addAction(QStringLiteral("Select source..."), this, &MainWindow::selectSimulationSource);
+    m_simLoadWheelchairAction = menu->addAction(QStringLiteral("Load R-Net wheelchair simulation (JSM login)"),
+                                                this,
+                                                &MainWindow::loadWheelchairSimulation);
     menu->addSeparator();
     m_simStartRepeatAction = menu->addAction(QStringLiteral("Start repeat"), this, &MainWindow::startSimulationRepeat);
     m_simStartOnceAction = menu->addAction(QStringLiteral("Start once"), this, &MainWindow::startSimulationOnce);
     m_simStopAction = menu->addAction(QStringLiteral("Stop"), this, &MainWindow::stopSimulation);
-
     updateSimulationActions();
 }
 
 void MainWindow::updateSimulationActions()
 {
     const bool hasSource = !m_simulationFrames.isEmpty();
-
     if (m_simSelectAction)
         m_simSelectAction->setEnabled(!m_simulationRunning);
+    if (m_simLoadWheelchairAction)
+        m_simLoadWheelchairAction->setEnabled(!m_simulationRunning);
     if (m_simStartRepeatAction)
         m_simStartRepeatAction->setEnabled(hasSource && !m_simulationRunning);
     if (m_simStartOnceAction)
@@ -197,13 +259,11 @@ QWidget *MainWindow::createCentral()
 {
     auto *root = new QWidget(this);
     auto *layout = new QVBoxLayout(root);
-
     auto *top = new QHBoxLayout;
     top->addWidget(createDeviceGroup(), 2);
     top->addWidget(createTransmitGroup(), 1);
     layout->addLayout(top);
     layout->addWidget(createViews(), 1);
-
     return root;
 }
 
@@ -242,7 +302,6 @@ QGroupBox *MainWindow::createDeviceGroup()
     grid->addWidget(m_batchSize, 1, 1);
     grid->addWidget(new QLabel(QStringLiteral("Poll delay ms"), box), 1, 2);
     grid->addWidget(m_pollDelay, 1, 3);
-
     grid->addWidget(createChannelGroup(QStringLiteral("Channel 1"), m_ch0, 0), 2, 0, 1, 2);
     grid->addWidget(createChannelGroup(QStringLiteral("Channel 2"), m_ch1, 1), 2, 2, 1, 2);
 
@@ -252,7 +311,6 @@ QGroupBox *MainWindow::createDeviceGroup()
     buttons->addWidget(m_logBtn);
     buttons->addWidget(m_clearBtn);
     buttons->addWidget(m_rnetPresetBtn);
-
     grid->addLayout(buttons, 3, 0, 1, 4);
     grid->addWidget(m_summary, 4, 0, 1, 4);
 
@@ -289,7 +347,6 @@ QGroupBox *MainWindow::createChannelGroup(const QString &title, ChannelWidgets &
     form->addRow(QStringLiteral("AccCode"), widgets.accCode);
     form->addRow(QStringLiteral("AccMask"), widgets.accMask);
     form->addRow(QStringLiteral("Status"), widgets.state);
-
     return box;
 }
 
@@ -301,7 +358,6 @@ QGroupBox *MainWindow::createTransmitGroup()
     m_txChannel = new QComboBox(box);
     m_txChannel->addItem(QStringLiteral("CAN1"), 0);
     m_txChannel->addItem(QStringLiteral("CAN2"), 1);
-
     m_txId = new QLineEdit(QStringLiteral("0x000"), box);
     m_txExtended = new QCheckBox(QStringLiteral("Extended 29-bit"), box);
     m_txRemote = new QCheckBox(QStringLiteral("Remote frame"), box);
@@ -314,7 +370,6 @@ QGroupBox *MainWindow::createTransmitGroup()
     form->addRow(m_txRemote);
     form->addRow(QStringLiteral("Data bytes"), m_txData);
     form->addRow(m_sendBtn);
-
     return box;
 }
 
@@ -349,11 +404,11 @@ QWidget *MainWindow::createRNetTab()
 {
     auto *w = new QWidget(this);
     auto *layout = new QVBoxLayout(w);
-
     auto *top = new QHBoxLayout;
 
-    auto *hint = new QLabel(
-        QStringLiteral("Optimized for 125 kbit/s R-Net capture and candump replay. Check R-Net rows in the Plot column, then open Signal View."),
+    auto *hint = new QLabel(QStringLiteral(
+        "Optimized for 125 kbit/s R-Net capture, candump replay and built-in wheelchair simulation.\n"
+        "Check R-Net rows in the Plot column, then open Signal View."),
         w);
     hint->setWordWrap(true);
 
@@ -369,7 +424,6 @@ QWidget *MainWindow::createRNetTab()
     m_signalView->resize(1100, 700);
     m_signalView->setAttribute(Qt::WA_DeleteOnClose, false);
     m_signalView->setInputEnabled(false);
-
     connect(m_signalViewBtn, &QPushButton::clicked, this, &MainWindow::openSignalViewWindow);
 
     m_rnetView = new QTableView(w);
@@ -390,7 +444,6 @@ void MainWindow::openSignalViewWindow()
 {
     if (!m_signalView || m_taggedSignalSources.isEmpty())
         return;
-
     m_signalView->setInputEnabled(true);
     m_signalView->show();
     m_signalView->raise();
@@ -410,10 +463,8 @@ QWidget *MainWindow::createLogTab()
 {
     auto *w = new QWidget(this);
     auto *layout = new QVBoxLayout(w);
-
     m_logView = new QPlainTextEdit(w);
     m_logView->setReadOnly(true);
-
     layout->addWidget(m_logView);
     return w;
 }
@@ -421,9 +472,8 @@ QWidget *MainWindow::createLogTab()
 bool MainWindow::parseHexUInt(const QString &text, quint32 *value)
 {
     bool ok = false;
-    const QString cleaned = text.trimmed().startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)
-                                ? text.trimmed().mid(2)
-                                : text.trimmed();
+    const QString trimmed = text.trimmed();
+    const QString cleaned = trimmed.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? trimmed.mid(2) : trimmed;
     const quint32 parsed = cleaned.toUInt(&ok, 16);
     if (ok && value)
         *value = parsed;
@@ -435,13 +485,11 @@ QByteArray MainWindow::parseHexBytes(const QString &text, bool *ok)
     QString cleaned = text;
     cleaned.replace(',', ' ');
     cleaned = cleaned.simplified().remove(' ');
-
     if (cleaned.isEmpty()) {
         if (ok)
             *ok = true;
         return {};
     }
-
     if ((cleaned.size() % 2) != 0) {
         if (ok)
             *ok = false;
@@ -461,7 +509,10 @@ QString MainWindow::frameTypeText(const CanFrame &frame)
 
 QString MainWindow::frameIdText(const CanFrame &frame)
 {
-    return "idtext";
+    return QStringLiteral("0x%1").arg(frame.id,
+                                      frame.extended ? 8 : 3,
+                                      16,
+                                      QLatin1Char('0')).toUpper();
 }
 
 bool MainWindow::parseSimulationLine(const QString &line, quint32 syntheticTs, CanFrame *frame)
@@ -474,10 +525,6 @@ bool MainWindow::parseSimulationLine(const QString &line, quint32 syntheticTs, C
         return false;
 
     QString frameToken;
-
-    // candump formats:
-    //   (1622641895.104166) can0 02000300#0000
-    //   can0 02000300#0000
     QString payload = trimmed;
     if (payload.startsWith('(')) {
         const int closePos = payload.indexOf(')');
@@ -485,9 +532,7 @@ bool MainWindow::parseSimulationLine(const QString &line, quint32 syntheticTs, C
             payload = payload.mid(closePos + 1).trimmed();
     }
 
-    const QStringList parts = payload.split(QRegularExpression(QStringLiteral("\\s+")),
-                                            Qt::SkipEmptyParts);
-
+    const QStringList parts = payload.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
     for (const QString &part : parts) {
         if (part.contains('#')) {
             frameToken = part;
@@ -495,12 +540,8 @@ bool MainWindow::parseSimulationLine(const QString &line, quint32 syntheticTs, C
         }
     }
 
-    // Lua / script / text formats:
-    // scan for the first CAN frame token embedded in quotes/comments,
-    // for example "02000300#0000" or cansend can0 1C0C0000#32.
     if (frameToken.isEmpty()) {
-        static const QRegularExpression tokenRe(
-            QStringLiteral("([0-9A-Fa-f]{1,8})#([0-9A-Fa-f]{0,16}|R|r)"));
+        static const QRegularExpression tokenRe(QStringLiteral("([0-9A-Fa-f]{1,8})#([0-9A-Fa-f]{0,16}|R|r)"));
         const QRegularExpressionMatch match = tokenRe.match(trimmed);
         if (!match.hasMatch())
             return false;
@@ -531,6 +572,8 @@ bool MainWindow::parseSimulationLine(const QString &line, quint32 syntheticTs, C
     f.extended = idText.size() > 3;
     f.remote = (dataPart.compare(QStringLiteral("R"), Qt::CaseInsensitive) == 0);
     f.error = false;
+    f.channel = 0;
+    f.direction = detectSimulationDirection(trimmed);
 
     if (f.remote) {
         f.data.clear();
@@ -560,23 +603,39 @@ bool MainWindow::loadSimulationFile(const QString &path, QString *error)
     }
 
     QTextStream in(&file);
-
     QVector<CanFrame> frames;
     frames.reserve(20000);
 
-    quint32 syntheticTs = 0;
+    quint32 fallbackTs = 0;
+    quint32 firstFileTs = 0;
+    bool haveFirstFileTs = false;
 
     while (true) {
         const QString line = in.readLine();
         if (line.isNull())
             break;
 
+        quint32 fileTs = 0;
+        const bool hasFileTs = extractCandumpTimestampUs(line, &fileTs);
+        const quint32 candidateTs = hasFileTs ? fileTs : fallbackTs;
+
         CanFrame frame;
-        if (!parseSimulationLine(line, syntheticTs, &frame))
+        if (!parseSimulationLine(line, candidateTs, &frame))
             continue;
 
+        if (hasFileTs) {
+            if (!haveFirstFileTs) {
+                firstFileTs = fileTs;
+                haveFirstFileTs = true;
+            }
+            frame.hwTimestamp = (fileTs >= firstFileTs) ? (fileTs - firstFileTs) : 0;
+            fallbackTs = frame.hwTimestamp + 100;
+        } else {
+            frame.hwTimestamp = fallbackTs;
+            fallbackTs += 100;
+        }
+
         frames.push_back(frame);
-        syntheticTs += 100;
     }
 
     if (frames.isEmpty()) {
@@ -585,17 +644,30 @@ bool MainWindow::loadSimulationFile(const QString &path, QString *error)
         return false;
     }
 
-    m_inputFile = path;
+    setSimulationFrames(path, std::move(frames));
+    return true;
+}
+
+void MainWindow::setSimulationFrames(const QString &sourceName, QVector<CanFrame> frames)
+{
+    stopSimulation();
+    m_inputFile = sourceName;
     m_simulationMode = true;
     m_simulationFrames = std::move(frames);
     m_simulationIndex = 0;
 
+    if (m_openBtn)
+        m_openBtn->setEnabled(false);
+    if (m_closeBtn)
+        m_closeBtn->setEnabled(false);
+    if (m_sendBtn)
+        m_sendBtn->setEnabled(false);
+
     onStatusMessage(QStringLiteral("Simulation source selected: %1 (%2 frames)")
-                        .arg(path)
+                        .arg(sourceName)
                         .arg(m_simulationFrames.size()),
                     false);
     updateSimulationActions();
-    return true;
 }
 
 DeviceOpenConfig MainWindow::currentConfigFromUi(bool *ok, QString *error) const
@@ -609,7 +681,8 @@ DeviceOpenConfig MainWindow::currentConfigFromUi(bool *ok, QString *error) const
     const auto &rate = kBitrates[bitrateIndex >= 0 ? bitrateIndex : 0];
 
     auto fillChannel = [&](const ChannelWidgets &w, ChannelConfig &c, int index) -> bool {
-        quint32 accCode = 0, accMask = 0;
+        quint32 accCode = 0;
+        quint32 accMask = 0;
         if (!parseHexUInt(w.accCode->text(), &accCode)) {
             if (error)
                 *error = QStringLiteral("Invalid AccCode on CAN%1").arg(index + 1);
@@ -620,6 +693,7 @@ DeviceOpenConfig MainWindow::currentConfigFromUi(bool *ok, QString *error) const
                 *error = QStringLiteral("Invalid AccMask on CAN%1").arg(index + 1);
             return false;
         }
+
         c.enabled = w.enabled->isChecked();
         c.canIndex = static_cast<DWORD>(index);
         c.accCode = accCode;
@@ -631,7 +705,7 @@ DeviceOpenConfig MainWindow::currentConfigFromUi(bool *ok, QString *error) const
         return true;
     };
 
-    bool localOk = fillChannel(m_ch0, cfg.channel0, 0) && fillChannel(m_ch1, cfg.channel1, 1);
+    const bool localOk = fillChannel(m_ch0, cfg.channel0, 0) && fillChannel(m_ch1, cfg.channel1, 1);
     if (ok)
         *ok = localOk;
     return cfg;
@@ -640,8 +714,9 @@ DeviceOpenConfig MainWindow::currentConfigFromUi(bool *ok, QString *error) const
 void MainWindow::openDevice()
 {
     if (m_simulationMode) {
-        QMessageBox::information(this, QStringLiteral("Simulation mode"),
-                                 QStringLiteral("Live CAN is disabled while replaying candump input."));
+        QMessageBox::information(this,
+                                 QStringLiteral("Simulation mode"),
+                                 QStringLiteral("Live CAN is disabled while replaying a simulation source."));
         return;
     }
 
@@ -652,9 +727,8 @@ void MainWindow::openDevice()
         QMessageBox::warning(this, QStringLiteral("Config error"), error);
         return;
     }
-    if (!m_worker->openDevice(cfg, &error)) {
+    if (!m_worker->openDevice(cfg, &error))
         QMessageBox::warning(this, QStringLiteral("Open failed"), error);
-    }
 }
 
 void MainWindow::closeDevice()
@@ -665,8 +739,9 @@ void MainWindow::closeDevice()
 void MainWindow::sendFrame()
 {
     if (m_simulationMode) {
-        QMessageBox::information(this, QStringLiteral("Simulation mode"),
-                                 QStringLiteral("Transmit is disabled while replaying candump input."));
+        QMessageBox::information(this,
+                                 QStringLiteral("Simulation mode"),
+                                 QStringLiteral("Transmit is disabled while replaying a simulation source."));
         return;
     }
 
@@ -679,7 +754,8 @@ void MainWindow::sendFrame()
     bool ok = false;
     const QByteArray data = parseHexBytes(m_txData->text(), &ok);
     if (!ok) {
-        QMessageBox::warning(this, QStringLiteral("Invalid data"),
+        QMessageBox::warning(this,
+                             QStringLiteral("Invalid data"),
                              QStringLiteral("Data must be 0-8 bytes in hex, e.g. 01 02 03."));
         return;
     }
@@ -700,12 +776,10 @@ void MainWindow::toggleLogging()
         return;
     }
 
-    const QString path = QFileDialog::getSaveFileName(
-        this,
-        QStringLiteral("Save CSV log"),
-        QDir::homePath() + QStringLiteral("/controlcan_capture.csv"),
-        QStringLiteral("CSV Files (*.csv)"));
-
+    const QString path = QFileDialog::getSaveFileName(this,
+                                                      QStringLiteral("Save CSV log"),
+                                                      QDir::homePath() + QStringLiteral("/controlcan_capture.csv"),
+                                                      QStringLiteral("CSV Files (*.csv)"));
     if (path.isEmpty())
         return;
 
@@ -722,7 +796,7 @@ void MainWindow::toggleLogging()
 void MainWindow::clearTables()
 {
     m_liveModel->clear();
-    static_cast<RNetFrameModel *>(m_rnetModel)->clear();
+    m_rnetModel->clear();
     m_taggedSignalSources.clear();
     if (m_signalView)
         m_signalView->clear();
@@ -752,16 +826,11 @@ void MainWindow::onFrameBatch(const QVector<CanFrame> &frames)
     if (frames.isEmpty())
         return;
 
-    auto *rnetModel = static_cast<RNetFrameModel *>(m_rnetModel);
-
     m_liveModel->addFrames(frames);
-
     for (const CanFrame &frame : frames) {
-        rnetModel->addFrame(frame);
-
+        m_rnetModel->addFrame(frame);
         if (m_logger.isActive())
             m_logger.write(frame);
-
         ++m_displayedFrames;
     }
 
@@ -778,21 +847,26 @@ void MainWindow::onFrameTx(const CanFrame &frame)
 
 void MainWindow::setStatusLamp(QLabel *label, const QString &text, const QString &color)
 {
+    if (!label)
+        return;
     label->setText(text);
-    label->setStyleSheet(
-        QStringLiteral("QLabel { background:%1; color:white; padding:4px 8px; border-radius:8px; }")
-            .arg(color));
+    label->setStyleSheet(QStringLiteral("QLabel { background:%1; color:white; padding:4px 8px; border-radius:8px; }")
+                             .arg(color));
 }
 
 void MainWindow::onCounters(quint64 rx0, quint64 rx1, quint64 tx0, quint64 tx1, quint64 err0, quint64 err1)
 {
-    m_summary->setText(QStringLiteral("RX0=%1  RX1=%2  TX0=%3  TX1=%4  ERR0=%5  ERR1=%6  Displayed=%7")
-                           .arg(rx0).arg(rx1).arg(tx0).arg(tx1).arg(err0).arg(err1).arg(m_displayedFrames));
-
+    m_summary->setText(QStringLiteral("RX0=%1 RX1=%2 TX0=%3 TX1=%4 ERR0=%5 ERR1=%6 Displayed=%7")
+                           .arg(rx0)
+                           .arg(rx1)
+                           .arg(tx0)
+                           .arg(tx1)
+                           .arg(err0)
+                           .arg(err1)
+                           .arg(m_displayedFrames));
     setStatusLamp(m_ch0.state,
                   err0 == 0 ? QStringLiteral("active") : QStringLiteral("warn"),
                   err0 == 0 ? QStringLiteral("#2e7d32") : QStringLiteral("#ef6c00"));
-
     setStatusLamp(m_ch1.state,
                   err1 == 0 ? QStringLiteral("active") : QStringLiteral("warn"),
                   err1 == 0 ? QStringLiteral("#2e7d32") : QStringLiteral("#ef6c00"));
@@ -800,13 +874,22 @@ void MainWindow::onCounters(quint64 rx0, quint64 rx1, quint64 tx0, quint64 tx1, 
 
 void MainWindow::onStatusMessage(const QString &message, bool error)
 {
-    const QString line = QStringLiteral("[%1] %2")
-    .arg(QDateTime::currentDateTime().toString(Qt::ISODateWithMs), message);
+    if (!m_logView)
+        return;
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_statusLogBaseMs < 0)
+        m_statusLogBaseMs = nowMs;
+    const double relSeconds = double(nowMs - m_statusLogBaseMs) / 1000.0;
+
+    const QString line = QStringLiteral("[%1s] %2")
+                             .arg(relSeconds, 0, 'f', 3)
+                             .arg(message);
     m_logView->appendPlainText(line);
     statusBar()->showMessage(message, 5000);
 
     if (error)
-        m_logView->appendPlainText(QStringLiteral("  -> check device open state, channel config, or cable/bus state"));
+        m_logView->appendPlainText(QStringLiteral(" -> check device open state, channel config, or cable/bus state"));
 }
 
 void MainWindow::onDeviceStateChanged(bool open)
@@ -816,7 +899,6 @@ void MainWindow::onDeviceStateChanged(bool open)
         m_closeBtn->setEnabled(open);
         m_sendBtn->setEnabled(open);
     }
-
     if (!open) {
         setStatusLamp(m_ch0.state, QStringLiteral("closed"), QStringLiteral("#666"));
         setStatusLamp(m_ch1.state, QStringLiteral("closed"), QStringLiteral("#666"));
@@ -825,12 +907,12 @@ void MainWindow::onDeviceStateChanged(bool open)
 
 void MainWindow::selectSimulationSource()
 {
-    const QString path = QFileDialog::getOpenFileName(
-        this,
-        QStringLiteral("Select simulation source"),
-        m_inputFile.isEmpty() ? QDir::homePath() : m_inputFile,
-        QStringLiteral("Simulation sources (*.txt *.log *.candump *.lua);;Candump text (*.txt *.log *.candump);;Lua scripts (*.lua);;All files (*)"));
-
+    const QString path = QFileDialog::getOpenFileName(this,
+                                                      QStringLiteral("Select simulation source"),
+                                                      m_inputFile.isEmpty() ? QDir::homePath() : m_inputFile,
+                                                      QStringLiteral("Simulation sources (*.txt *.log *.candump *.lua);;"
+                                                                     "Candump text (*.txt *.log *.candump);;"
+                                                                     "Lua scripts (*.lua);;All files (*)"));
     if (path.isEmpty())
         return;
 
@@ -841,16 +923,21 @@ void MainWindow::selectSimulationSource()
     }
 }
 
+void MainWindow::loadWheelchairSimulation()
+{
+    auto frames = RNetWheelchairSimulator::createScenario();
+    setSimulationFrames(RNetWheelchairSimulator::scenarioName(), std::move(frames));
+    onStatusMessage(QStringLiteral("Loaded lab-only simulation: JSM Anmeldung JA, Rollstuhl simuliert; RX=sends later, TX=received/reported later."), false);
+    onStatusMessage(QStringLiteral("The built-in login is synthetic and intentionally non-authentic; it is for analyzer/emulation only."), false);
+}
+
 void MainWindow::startSimulationOnce()
 {
     if (m_simulationFrames.isEmpty())
         return;
 
-    // A one-shot replay must never inherit a previous repeat run.
-    // Stop any active/queued replay timer before changing mode.
     if (m_simulationTimer)
         m_simulationTimer->stop();
-
     m_simulationRepeat = false;
     m_simulationRunning = false;
     m_simulationIndex = 0;
@@ -861,7 +948,6 @@ void MainWindow::startSimulationOnce()
     m_simulationRunning = true;
     m_simulationIndex = 0;
     m_simulationTimer->start();
-
     onStatusMessage(QStringLiteral("Simulation started once: %1").arg(m_inputFile), false);
     updateSimulationActions();
 }
@@ -873,7 +959,6 @@ void MainWindow::startSimulationRepeat()
 
     if (m_simulationTimer)
         m_simulationTimer->stop();
-
     m_simulationRepeat = false;
     m_simulationRunning = false;
     m_simulationIndex = 0;
@@ -884,7 +969,6 @@ void MainWindow::startSimulationRepeat()
     m_simulationRunning = true;
     m_simulationIndex = 0;
     m_simulationTimer->start();
-
     onStatusMessage(QStringLiteral("Simulation started repeat: %1").arg(m_inputFile), false);
     updateSimulationActions();
 }
@@ -893,10 +977,8 @@ void MainWindow::stopSimulation()
 {
     if (m_simulationTimer)
         m_simulationTimer->stop();
-
     if (m_simulationRunning)
         onStatusMessage(QStringLiteral("Simulation stopped"), false);
-
     m_simulationRunning = false;
     m_simulationRepeat = false;
     updateSimulationActions();
@@ -910,19 +992,16 @@ void MainWindow::replaySimulationTick()
     }
 
     constexpr qsizetype kFramesPerTick = 80;
-
     QVector<CanFrame> batch;
     batch.reserve(kFramesPerTick);
 
     for (qsizetype i = 0; i < kFramesPerTick; ++i) {
         if (m_simulationIndex >= m_simulationFrames.size()) {
-            if (m_simulationRepeat) {
+            if (m_simulationRepeat)
                 m_simulationIndex = 0;
-            } else {
+            else
                 break;
-            }
         }
-
         if (m_simulationIndex < m_simulationFrames.size())
             batch.push_back(m_simulationFrames.at(m_simulationIndex++));
     }
@@ -930,11 +1009,22 @@ void MainWindow::replaySimulationTick()
     if (!batch.isEmpty())
         onFrameBatch(batch);
 
-    onCounters(static_cast<quint64>(m_simulationIndex), 0, 0, 0, 0, 0);
+    quint64 rx0 = 0;
+    quint64 tx0 = 0;
+    quint64 err0 = 0;
+    for (qsizetype i = 0; i < m_simulationIndex && i < m_simulationFrames.size(); ++i) {
+        const CanFrame &frame = m_simulationFrames.at(i);
+        if (frame.error)
+            ++err0;
+        if (frame.direction == dir_tx)
+            ++tx0;
+        else
+            ++rx0;
+    }
+    onCounters(rx0, 0, tx0, 0, err0, 0);
 
     if (!m_simulationRepeat && m_simulationIndex >= m_simulationFrames.size()) {
         stopSimulation();
         onStatusMessage(QStringLiteral("Simulation finished: %1 frames").arg(m_simulationFrames.size()), false);
     }
 }
-

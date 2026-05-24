@@ -1,4 +1,0 @@
-[submodule "third_party/waveshares_USBCAN_B"]
-	path = third_party/waveshares_USBCAN_B
-	url = git@github.com:notwendig/waveshares_USBCAN_B.git
-	branch = main

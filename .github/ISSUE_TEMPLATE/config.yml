@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: QtRNetAnalyzer repository
+    url: https://github.com/notwendig/QtRNetAnalyzer
+    about: Project repository and source code.
+  - name: waveUSBCAN_b driver repository
+    url: https://github.com/notwendig/waveUSBCAN_b
+    about: SocketCAN driver used for Waveshare USBCAN-B / CANalyst-II compatible adapters.
