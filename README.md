@@ -231,3 +231,15 @@ Third-party drivers, vendor SDKs, datasheets and hardware documentation belong t
 
 - Jürgen Willi Sievers, JSievers@NadiSoft.de
 - ChatGPT-assisted development and analysis
+
+
+### CSV logging
+
+`Start CSV Log` now only starts an in-memory capture buffer. No filename is requested at start time.
+When `Stop CSV Log` is pressed, QtRNetAnalyzer asks for the output file name. The proposed default is:
+
+```text
+<current-path>/R-Netlog-YYYYMMDD-HHMMSS.csv
+```
+
+This keeps short test captures fast and avoids creating unwanted files when a capture is discarded.

@@ -1,4 +1,10 @@
 
+## Next
+
+- CSV logging now records to an in-memory buffer after **Start CSV Log** and asks for the output filename only on **Stop CSV Log**.
+- Default CSV filename is `<current-path>/R-Netlog-YYYYMMDD-HHMMSS.csv`.
+
+
 ## Unreleased
 
 - Added Qt SerialBus/QCanBus based Device menu for SocketCAN interface selection.
