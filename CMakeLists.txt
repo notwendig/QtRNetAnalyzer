@@ -15,6 +15,18 @@ qt_standard_project_setup()
 
 option(QTRNET_ENABLE_SOCKETCAN "Enable Linux SocketCAN hardware capture backend" ON)
 
+#
+# External subprojects
+#
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/RNetMsgBroker/CMakeLists.txt")
+  message(FATAL_ERROR
+    "external/RNetMsgBroker fehlt.\n"
+    "Bitte RNetMsgBroker nach external/RNetMsgBroker kopieren oder klonen."
+  )
+endif()
+
+add_subdirectory(external/RNetMsgBroker)
+
 set(QTRNET_SOURCES
   src/main.cpp
   src/appsettingscontroller.cpp
@@ -24,7 +36,6 @@ set(QTRNET_SOURCES
   src/translationcatalog.cpp
   src/mainwindow.cpp
   src/mainwindow.h
-  src/canframe.h
   src/canlogger.cpp
   src/canlogger.h
   src/controlcandeviceworker.cpp
@@ -33,8 +44,6 @@ set(QTRNET_SOURCES
   src/liveframedelegate.h
   src/liveframemodel.cpp
   src/liveframemodel.h
-  src/rnetframe.cpp
-  src/rnetframe.h
   src/rnetframedelegate.cpp
   src/rnetframedelegate.h
   src/rnetframemodel.cpp
@@ -77,6 +86,7 @@ target_link_libraries(QtRNetAnalyzer
     Qt6::Core
     Qt6::Widgets
     Qt6::SerialBus
+    RNetMsgBroker
 )
 
 if(QTRNET_ENABLE_SOCKETCAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
