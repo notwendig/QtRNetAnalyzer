@@ -1,0 +1,4 @@
+[submodule "external/RNetMsgBroker"]
+	path = external/RNetMsgBroker
+	url = git@github.com:notwendig/RNetMsgBroker.git
+	branch = chatgpt

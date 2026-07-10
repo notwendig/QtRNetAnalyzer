@@ -25,13 +25,13 @@ class RNetFrameModel final : public QAbstractTableModel
     {
         ColTag = 0,
         ColIndex,
+        ColCount,
         ColId,
         ColName,
         ColData,
         ColExt,
         ColRtr,
         ColTimestamp,
-        ColCount,
         ColText,
         ColumnCount
     };

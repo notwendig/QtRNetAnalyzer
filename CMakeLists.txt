@@ -14,6 +14,16 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets SerialBus LinguistTools)
 qt_standard_project_setup()
 
 option(QTRNET_ENABLE_SOCKETCAN "Enable Linux SocketCAN hardware capture backend" ON)
+option(QTRNET_ENABLE_DANGEROUS_TX "Enable dangerous laboratory-only CAN transmit UI" OFF)
+
+
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/RNetMsgBroker/CMakeLists.txt")
+  message(FATAL_ERROR
+    "external/RNetMsgBroker fehlt. Bitte RNetMsgBroker nach external/RNetMsgBroker kopieren."
+  )
+endif()
+
+add_subdirectory(external/RNetMsgBroker)
 
 #
 # External subprojects
@@ -89,6 +99,13 @@ target_link_libraries(QtRNetAnalyzer
     RNetMsgBroker
 )
 
+if(QTRNET_ENABLE_DANGEROUS_TX)
+    target_compile_definitions(QtRNetAnalyzer PRIVATE QTRNET_ENABLE_DANGEROUS_TX=1)
+    message(WARNING "Dangerous CAN TX is enabled. Use only on isolated lab wiring.")
+else()
+    target_compile_definitions(QtRNetAnalyzer PRIVATE QTRNET_ENABLE_DANGEROUS_TX=0)
+endif()
+
 if(QTRNET_ENABLE_SOCKETCAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_compile_definitions(QtRNetAnalyzer PRIVATE QTRA_HAS_SOCKETCAN=1)
   message(STATUS "Linux SocketCAN backend enabled. Use waveUSBCAN_b DKMS driver to expose can0/can1.")
@@ -100,4 +117,11 @@ endif()
 install(TARGETS QtRNetAnalyzer
   BUNDLE DESTINATION .
   RUNTIME DESTINATION bin
+)
+
+
+add_custom_command(TARGET QtRNetAnalyzer POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/RNetMsgBroker/R-Net.json
+    $<TARGET_FILE_DIR:QtRNetAnalyzer>/R-Net.json
 )
