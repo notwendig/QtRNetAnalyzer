@@ -19,9 +19,8 @@ struct SignalHistory
     // User-visible checkbox state in the Signal View tree.
     bool enabled = true;
 
-    // False for display-only metadata such as the per-frame counter.
-    // Metadata is kept in the tree/value column but is excluded from the plot
-    // and from auto-scaling so it cannot crush real signals such as joystick X/Y.
+    // False only for channels that must never be drawn. Normal selectable
+    // signals, including Count, are plottable when their checkbox is checked.
     bool plottable = true;
 };
 

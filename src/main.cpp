@@ -5,7 +5,6 @@
 
 #include "appsettingscontroller.h"
 #include "mainwindow.h"
-#include "translationmanager.h"
 
 int main(int argc, char *argv[])
 {
@@ -16,8 +15,6 @@ int main(int argc, char *argv[])
   QCoreApplication::setApplicationName(QStringLiteral("QtRNetAnalyzer"));
   QCoreApplication::setApplicationVersion(QStringLiteral("1.1.0"));
 
-  TranslationManager translations(&app);
-  translations.loadInitialLanguage();
 
   QCommandLineParser parser;
   parser.setApplicationDescription(
@@ -35,7 +32,6 @@ int main(int argc, char *argv[])
 
   MainWindow window(parser.value(inputOption));
   AppSettingsController settings(&window);
-  translations.installOn(&window);
 
   window.show();
   return app.exec();

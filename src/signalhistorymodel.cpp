@@ -89,9 +89,9 @@ void SignalHistoryModel::addSamplesFromFrame(quint64 sourceKey, const QString &s
     const QString prefix = sourceName.isEmpty() ? QStringLiteral("R-Net") : sourceName;
     m_sourceNames.insert(sourceKey, prefix);
 
-    // Keep the counter visible in the tree/value column, but do not plot it by
-    // default. Otherwise the monotonically increasing frame count dominates the
-    // Y range and makes joystick/battery signals look like a broken flat line.
+    // Keep the frame counter as a normal selectable signal. If Count is checked
+    // in Signal View, it must be drawn in the graph as well as shown in Value.
+    // Users can uncheck Count when it dominates the Y range.
     const double t = frameTimeSec(frame);
     addFrameCounterSample(sourceKey, prefix, t);
 
@@ -177,8 +177,8 @@ void SignalHistoryModel::addFrameCounterSample(quint64 sourceKey, const QString 
     addSampleInternal(SignalSample(makeSignalKey(sourceKey, kSignalFrameCount), sourceKey,
                                    sourceName + QStringLiteral(" Count"), t,
                                    static_cast<double>(count), QStringLiteral("frames")),
-                      false,
-                      false);
+                      true,
+                      true);
 }
 
 void SignalHistoryModel::addPayloadByteSamples(quint64 sourceKey, const QString &sourceName, const CanFrame &frame, double t)

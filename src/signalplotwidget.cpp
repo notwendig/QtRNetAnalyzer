@@ -4,6 +4,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QToolTip>
+#include <QFontMetrics>
 #include <QtMath>
 
 QColor SignalPlotWidget::colorForSignalKey(quint64 key)
@@ -150,7 +151,11 @@ void SignalPlotWidget::leaveEvent(QEvent *event)
 
 QRect SignalPlotWidget::plotRect() const
 {
-    return rect().adjusted(56, 12, -16, -34);
+    // Keep enough bottom space for x-axis labels plus the two-line help text.
+    // This scales with the current UI font so labels do not collide on HiDPI or
+    // with larger desktop fonts.
+    const int bottomMargin = qMax(66, fontMetrics().height() * 3 + 28);
+    return rect().adjusted(56, 12, -16, -bottomMargin);
 }
 
 double SignalPlotWidget::xToTime(int x) const
@@ -188,8 +193,14 @@ void SignalPlotWidget::updateLiveWindow()
         return;
     }
 
+    // LIVE without manual zoom must show the complete selected signal history:
+    // first frame/sample through latest frame/sample.  Previously this was a
+    // rolling last-N-seconds window, so long replays started around frame N-30s
+    // instead of at frame 0.  Manual drag zoom still overrides this range until
+    // Reset Zoom is pressed.
+    m_viewStart = m_model->minTime();
     m_viewEnd = m_model->maxTime();
-    m_viewStart = qMax(m_model->minTime(), m_viewEnd - m_liveWindowSec);
+
     if (qFuzzyCompare(m_viewStart, m_viewEnd))
         m_viewEnd = m_viewStart + 1.0;
 }
@@ -286,7 +297,8 @@ void SignalPlotWidget::drawTimeAxis(QPainter &painter, const QRect &plot) const
         painter.drawLine(x, plot.top(), x, plot.bottom());
         painter.setPen(QColor(150, 155, 165));
         painter.drawLine(x, plot.bottom(), x, plot.bottom() + 5);
-        painter.drawText(x + 3, plot.bottom() + 20,
+        const int labelY = plot.bottom() + painter.fontMetrics().ascent() + 8;
+        painter.drawText(x + 3, labelY,
                          QStringLiteral("%1 s").arg(t, 0, 'f', span < 2.0 ? 3 : 2));
     }
 }
@@ -386,12 +398,25 @@ void SignalPlotWidget::drawCrosshair(QPainter &painter, const QRect &plot) const
 
 void SignalPlotWidget::drawLegend(QPainter &painter, const QRect &plot) const
 {
-    Q_UNUSED(plot)
     painter.setPen(m_paused ? QColor(255, 190, 80) : QColor(120, 220, 120));
     painter.drawText(width() - 150, 22, m_paused ? QStringLiteral("PAUSED") : QStringLiteral("LIVE"));
+
     painter.setPen(QColor(150, 155, 165));
-    painter.drawText(width() - 260, height() - 8,
-                     QStringLiteral("Drag: zoom | Click: pause/live | Right click: reset"));
+
+    const QFontMetrics fm(painter.font());
+    const int lineH = fm.height();
+    const int margin = 6;
+
+    // The bottom area is intentionally separated from the x-axis labels:
+    // x-axis labels sit just below plot.bottom(), help text starts lower.
+    const int line1Y = qMax(plot.bottom() + lineH + 18, height() - (2 * lineH) - margin);
+    const QRect line1(plot.left(), line1Y, plot.width(), lineH + 2);
+    const QRect line2(plot.left(), line1Y + lineH + 2, plot.width(), lineH + 2);
+
+    painter.drawText(line1, Qt::AlignRight | Qt::AlignVCenter,
+                     QStringLiteral("Drag: zoom | Click: pause/live"));
+    painter.drawText(line2, Qt::AlignRight | Qt::AlignVCenter,
+                     QStringLiteral("Right click: reset"));
 }
 
 QString SignalPlotWidget::cursorText(double timeSec) const

@@ -88,6 +88,8 @@ void SignalViewWindow::addFrame(quint64 sourceKey, const QString &sourceName, co
         rebuildSignalTree();
 
     m_plot->refreshView();
+    // SIGNAL_VALUE_COUNT_LIVE_REFRESH: keep Value column current in LIVE/no-cursor mode.
+    updateTreeValuesForCurrentMode();
 }
 
 void SignalViewWindow::removeSource(quint64 sourceKey)
@@ -95,14 +97,21 @@ void SignalViewWindow::removeSource(quint64 sourceKey)
     m_history.removeSource(sourceKey);
     rebuildSignalTree();
     m_plot->refreshView();
+    // SIGNAL_VALUE_COUNT_LIVE_REFRESH: keep Value column current in LIVE/no-cursor mode.
+    updateTreeValuesForCurrentMode();
 }
 
 void SignalViewWindow::clear()
 {
     m_history.clear();
+    // SIGNAL_VALUE_COUNT_CLEAR_CURSOR
+    m_cursorActive = false;
+    m_cursorTimeSec = 0.0;
     m_signalTree->clear();
     m_plot->resetZoom();
     m_plot->refreshView();
+    // SIGNAL_VALUE_COUNT_LIVE_REFRESH: keep Value column current in LIVE/no-cursor mode.
+    updateTreeValuesForCurrentMode();
     setInputEnabled(false);
     m_status->setText(QStringLiteral("Signal history cleared.\nCheck at least one R-Net row to enable Signal View selection."));
 }
@@ -111,6 +120,8 @@ void SignalViewWindow::refreshSignals()
 {
     rebuildSignalTree();
     m_plot->refreshView();
+    // SIGNAL_VALUE_COUNT_LIVE_REFRESH: keep Value column current in LIVE/no-cursor mode.
+    updateTreeValuesForCurrentMode();
 }
 
 void SignalViewWindow::onSignalItemChanged(QTreeWidgetItem *item, int column)
@@ -152,6 +163,8 @@ void SignalViewWindow::onSignalItemChanged(QTreeWidgetItem *item, int column)
 
     m_updatingTree = false;
     m_plot->refreshView();
+    // SIGNAL_VALUE_COUNT_LIVE_REFRESH: keep Value column current in LIVE/no-cursor mode.
+    updateTreeValuesForCurrentMode();
 }
 
 void SignalViewWindow::onPauseChanged(bool paused)
@@ -209,7 +222,7 @@ void SignalViewWindow::rebuildSignalTree()
             signalItem->setText(0, signalName);
             signalItem->setText(1, QStringLiteral("■"));
             signalItem->setForeground(1, QBrush(SignalPlotWidget::colorForSignalKey(signalKey)));
-            signalItem->setText(2, QStringLiteral("—"));
+            signalItem->setText(2, m_cursorActive ? valueTextAt(signalKey, m_cursorTimeSec) : valueTextLatest(signalKey));
             signalItem->setText(3, history.unit);
             signalItem->setFlags(signalItem->flags() | Qt::ItemIsUserCheckable);
             signalItem->setCheckState(0, history.enabled ? Qt::Checked : Qt::Unchecked);
@@ -234,7 +247,20 @@ void SignalViewWindow::rebuildSignalTree()
 
 void SignalViewWindow::onCursorTimeChanged(double timeSec, bool active)
 {
-    updateTreeValuesAt(timeSec, active);
+    m_cursorTimeSec = timeSec;
+    m_cursorActive = active;
+    updateTreeValuesForCurrentMode();
+}
+
+void SignalViewWindow::updateTreeValuesForCurrentMode()
+{
+    if (!m_signalTree)
+        return;
+
+    if (m_cursorActive)
+        updateTreeValuesAt(m_cursorTimeSec, true);
+    else
+        updateTreeValuesAt(m_history.maxTime(), false);
 }
 
 void SignalViewWindow::updateTreeValuesAt(double timeSec, bool active)
@@ -249,11 +275,21 @@ void SignalViewWindow::updateTreeValuesAt(double timeSec, bool active)
             if (!signalItem)
                 continue;
 
-            signalItem->setText(2, active ? valueTextAt(itemKey(signalItem), timeSec) : QStringLiteral("—"));
+            signalItem->setText(2, active ? valueTextAt(itemKey(signalItem), timeSec) : valueTextLatest(itemKey(signalItem)));
         }
     }
 
     m_signalTree->resizeColumnToContents(2);
+}
+
+QString SignalViewWindow::valueTextLatest(quint64 signalKey) const
+{
+    const auto it = m_history.allSignals().constFind(signalKey);
+    if (it == m_history.allSignals().constEnd() || it->samples.isEmpty())
+        return QStringLiteral("—");
+
+    const SignalSample &sample = it->samples.constLast();
+    return QString::number(sample.value, 'g', 6);
 }
 
 QString SignalViewWindow::valueTextAt(quint64 signalKey, double timeSec) const

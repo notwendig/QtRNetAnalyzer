@@ -37,7 +37,9 @@ private slots:
 private:
     void rebuildSignalTree();
     void updateTreeValuesAt(double timeSec, bool active);
+    void updateTreeValuesForCurrentMode();
     QString valueTextAt(quint64 signalKey, double timeSec) const;
+    QString valueTextLatest(quint64 signalKey) const;
     static quint64 itemKey(const QTreeWidgetItem *item);
     static bool isSignalItem(const QTreeWidgetItem *item);
     static bool isSourceItem(const QTreeWidgetItem *item);
@@ -51,4 +53,6 @@ private:
 
     bool m_updatingTree = false;
     bool m_inputEnabled = false;
+    double m_cursorTimeSec = 0.0;
+    bool m_cursorActive = false;
 };
