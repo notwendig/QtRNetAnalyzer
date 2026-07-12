@@ -17,21 +17,13 @@ option(QTRNET_ENABLE_SOCKETCAN "Enable Linux SocketCAN hardware capture backend"
 option(QTRNET_ENABLE_DANGEROUS_TX "Enable dangerous laboratory-only CAN transmit UI" OFF)
 
 
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/RNetMsgBroker/CMakeLists.txt")
-  message(FATAL_ERROR
-    "external/RNetMsgBroker fehlt. Bitte RNetMsgBroker nach external/RNetMsgBroker kopieren."
-  )
-endif()
-
-add_subdirectory(external/RNetMsgBroker)
-
 #
 # External subprojects
 #
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/RNetMsgBroker/CMakeLists.txt")
   message(FATAL_ERROR
-    "external/RNetMsgBroker fehlt.\n"
-    "Bitte RNetMsgBroker nach external/RNetMsgBroker kopieren oder klonen."
+    "external/RNetMsgBroker fehlt. Bitte Submodule initialisieren:\n"
+    "git submodule update --init --recursive"
   )
 endif()
 
