@@ -33,9 +33,6 @@ set(QTRNET_SOURCES
   src/main.cpp
   src/appsettingscontroller.cpp
   src/appsettingscontroller.h
-  src/translationmanager.cpp
-  src/translationmanager.h
-  src/translationcatalog.cpp
   src/mainwindow.cpp
   src/mainwindow.h
   src/canlogger.cpp

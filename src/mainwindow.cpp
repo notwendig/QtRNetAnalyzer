@@ -47,6 +47,9 @@
 
 #include <utility>
 
+// QT6_TRANSLATION_ONLY: translations use Qt6 QTranslator/LanguageChange only; no global widget pointer pass.
+
+
 namespace
 {
 struct BitrateItem
@@ -958,18 +961,54 @@ void MainWindow::onDeviceStateChanged(bool open)
 
 void MainWindow::selectSimulationSource()
 {
-    const QString path = QFileDialog::getOpenFileName(this/*,
-                                                      QStringLiteral("Select simulation source"),
-                                                      m_inputFile.isEmpty() ? QDir::homePath() : m_inputFile,
-                                                      QStringLiteral("Simulation sources (*.txt *.log *.candump *.lua);;"
-                                                                     "Candump text (*.txt *.log *.candump);;"
-                                                                     "Lua scripts (*.lua);;All files (*)")*/);
+    QString startPath = QDir::homePath();
+
+    if (!m_inputFile.trimmed().isEmpty()) {
+        const QFileInfo fi(m_inputFile);
+
+        if (fi.exists()) {
+            startPath = fi.isDir() ? fi.absoluteFilePath()
+                                   : fi.absolutePath();
+        } else {
+            const QString parentPath = fi.absolutePath();
+            if (!parentPath.isEmpty() && QFileInfo(parentPath).isDir())
+                startPath = parentPath;
+        }
+    }
+
+    QFileDialog dialog(this);
+    dialog.setWindowTitle(tr("Select simulation source"));
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    dialog.setAcceptMode(QFileDialog::AcceptOpen);
+    dialog.setDirectory(startPath);
+    dialog.setNameFilters({
+        tr("Simulation sources (*.txt *.log *.candump *.lua)"),
+        tr("Candump text (*.txt *.log *.candump)"),
+        tr("Lua scripts (*.lua)"),
+        tr("All files (*)")
+    });
+
+    // Important: avoid the native/portal dialog path which can hang on some
+    // Fedora desktop setups. This still uses Qt6 QFileDialog, but as a pure
+    // Qt widget dialog.
+    dialog.setOption(QFileDialog::DontUseNativeDialog, true);
+    dialog.setOption(QFileDialog::DontUseCustomDirectoryIcons, true);
+    dialog.selectNameFilter(tr("Simulation sources (*.txt *.log *.candump *.lua)"));
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const QStringList selected = dialog.selectedFiles();
+    if (selected.isEmpty())
+        return;
+
+    const QString path = selected.constFirst();
     if (path.isEmpty())
         return;
 
     QString error;
     if (!loadSimulationFile(path, &error)) {
-        QMessageBox::warning(this, QStringLiteral("Simulation source"), error);
+        QMessageBox::warning(this, tr("Simulation source"), error);
         onStatusMessage(error, true);
     }
 }
