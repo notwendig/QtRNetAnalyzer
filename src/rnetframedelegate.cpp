@@ -1,4 +1,5 @@
 #include "rnetframedelegate.h"
+#include "rnetframemodel.h"
 
 #include <QAbstractItemModel>
 #include <QApplication>
@@ -18,6 +19,18 @@ void RNetFrameDelegate::paint(QPainter *painter,
                               const QStyleOptionViewItem &option,
                               const QModelIndex &index) const
 {
+    if (!index.isValid() || index.column() != 0) {
+        QStyledItemDelegate::paint(painter, option, index);
+        return;
+    }
+
+    if (index.column() == RNetFrameModel::ColCount) {
+        QStyleOptionViewItem countOpt(option);
+        initStyleOption(&countOpt, index);
+        countOpt.displayAlignment = Qt::AlignCenter;
+        QStyledItemDelegate::paint(painter, countOpt, index);
+        return;
+    }
     QStyleOptionViewItem opt(option);
     initStyleOption(&opt, index);
 

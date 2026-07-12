@@ -14,6 +14,20 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets SerialBus LinguistTools)
 qt_standard_project_setup()
 
 option(QTRNET_ENABLE_SOCKETCAN "Enable Linux SocketCAN hardware capture backend" ON)
+option(QTRNET_ENABLE_DANGEROUS_TX "Enable dangerous laboratory-only CAN transmit UI" OFF)
+
+
+#
+# External subprojects
+#
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/RNetMsgBroker/CMakeLists.txt")
+  message(FATAL_ERROR
+    "external/RNetMsgBroker fehlt. Bitte Submodule initialisieren:\n"
+    "git submodule update --init --recursive"
+  )
+endif()
+
+add_subdirectory(external/RNetMsgBroker)
 
 set(QTRNET_SOURCES
   src/main.cpp
@@ -24,7 +38,6 @@ set(QTRNET_SOURCES
   src/translationcatalog.cpp
   src/mainwindow.cpp
   src/mainwindow.h
-  src/canframe.h
   src/canlogger.cpp
   src/canlogger.h
   src/controlcandeviceworker.cpp
@@ -33,8 +46,6 @@ set(QTRNET_SOURCES
   src/liveframedelegate.h
   src/liveframemodel.cpp
   src/liveframemodel.h
-  src/rnetframe.cpp
-  src/rnetframe.h
   src/rnetframedelegate.cpp
   src/rnetframedelegate.h
   src/rnetframemodel.cpp
@@ -77,7 +88,15 @@ target_link_libraries(QtRNetAnalyzer
     Qt6::Core
     Qt6::Widgets
     Qt6::SerialBus
+    RNetMsgBroker
 )
+
+if(QTRNET_ENABLE_DANGEROUS_TX)
+    target_compile_definitions(QtRNetAnalyzer PRIVATE QTRNET_ENABLE_DANGEROUS_TX=1)
+    message(WARNING "Dangerous CAN TX is enabled. Use only on isolated lab wiring.")
+else()
+    target_compile_definitions(QtRNetAnalyzer PRIVATE QTRNET_ENABLE_DANGEROUS_TX=0)
+endif()
 
 if(QTRNET_ENABLE_SOCKETCAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_compile_definitions(QtRNetAnalyzer PRIVATE QTRA_HAS_SOCKETCAN=1)
@@ -90,4 +109,11 @@ endif()
 install(TARGETS QtRNetAnalyzer
   BUNDLE DESTINATION .
   RUNTIME DESTINATION bin
+)
+
+
+add_custom_command(TARGET QtRNetAnalyzer POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/RNetMsgBroker/R-Net.json
+    $<TARGET_FILE_DIR:QtRNetAnalyzer>/R-Net.json
 )

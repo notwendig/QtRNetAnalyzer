@@ -145,5 +145,4 @@ private:
 #include "deferredcsvfiledialog.h"
 
 #ifndef QTRNETANALYZER_USE_REAL_QFILEDIALOG_IN_MAINWINDOW_CPP
-#define QFileDialog QtraDeferredCsvFileDialog
 #endif

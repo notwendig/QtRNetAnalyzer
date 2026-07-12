@@ -250,3 +250,7 @@ When `Stop CSV Log` is pressed, QtRNetAnalyzer asks for the output file name. Th
 ```
 
 This keeps short test captures fast and avoids creating unwanted files when a capture is discarded.
+
+## TX-Sicherheit
+
+CAN-Transmit ist standardmäßig deaktiviert. Labor-Transmit nur mit `-DQTRNET_ENABLE_DANGEROUS_TX=ON`; siehe `docs/TX_SAFETY.md`.

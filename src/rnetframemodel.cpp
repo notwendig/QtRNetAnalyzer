@@ -38,7 +38,8 @@ QVariant RNetFrameModel::headerData(int section, Qt::Orientation orientation, in
     case ColExt:       return QStringLiteral("Ext");
     case ColRtr:       return QStringLiteral("RTR");
     case ColTimestamp: return QStringLiteral("Timestamp");
-    case ColCount:     return QStringLiteral("Count");
+    case ColCount:
+        return QStringLiteral("Count");
     case ColText:      return QStringLiteral("Text");
     default:           return {};
     }
@@ -110,7 +111,8 @@ QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
         return QString::number(frame->hwTimestamp, 'f', 6);
 
     case ColCount:
-        return static_cast<qulonglong>(bucket.totalCount);
+
+        return QString::number(static_cast<qulonglong>(bucket.totalCount));
 
     case ColText:
         return frame->toString();
@@ -188,6 +190,13 @@ void RNetFrameModel::addFrame(const CanFrame &frame)
         m_rowByKey.insert(key, row);
 
         endInsertRows();
+        // RNET_COUNT_R6_INSERT_REFRESH
+        emit dataChanged(index(row, ColCount), index(row, ColCount), {Qt::DisplayRole});
+        // RNET_COUNT_R5_INSERT_REFRESH
+        emit dataChanged(index(row, ColCount), index(row, ColCount), {Qt::DisplayRole});
+        const QModelIndex countIdx = index(row, ColCount);
+        const QModelIndex textIdx = index(row, ColText);
+        emit dataChanged(countIdx, textIdx, {Qt::DisplayRole});
     }
     else
     {
@@ -197,6 +206,10 @@ void RNetFrameModel::addFrame(const CanFrame &frame)
 
         RowBucket &bucket = m_rows[static_cast<std::size_t>(row)];
         ++bucket.totalCount;
+        // RNET_COUNT_R6_ALWAYS_REFRESH: Count is cheap and must never look stale/empty.
+        emit dataChanged(index(row, ColCount), index(row, ColCount), {Qt::DisplayRole});
+        // RNET_COUNT_R5_ALWAYS_REFRESH: Count is cheap and must never look stale/empty.
+        emit dataChanged(index(row, ColCount), index(row, ColCount), {Qt::DisplayRole});
         bucket.history.push_back(std::move(decoded));
         if (bucket.history.size() > kMaxHistoryPerRow)
             bucket.history.erase(bucket.history.begin(), bucket.history.begin() + (bucket.history.size() - kMaxHistoryPerRow));

@@ -1,8 +1,15 @@
 #include "mainwindow.h"
+#include "deferredcsvfiledialog.h"
 
 #include "liveframedelegate.h"
 #include "rnetframedelegate.h"
 #include "rnetwheelchairsimulator.h"
+
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QFileInfo>
+#include <QDir>
+#include <QMessageBox>
 
 #include <QAbstractItemView>
 #include <QAction>
@@ -148,7 +155,37 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
     m_liveView->setItemDelegate(new LiveFrameDelegate(m_liveView));
 
     m_rnetView->setModel(m_rnetProxy);
-    m_rnetView->setItemDelegate(new RNetFrameDelegate(m_rnetView));
+    // RNET_COUNT_R6_LAYOUT: keep Count visible directly after #.
+    if (m_rnetView && m_rnetView->horizontalHeader()) {
+        auto *rnetHeader = m_rnetView->horizontalHeader();
+        m_rnetView->showColumn(RNetFrameModel::ColCount);
+        rnetHeader->setStretchLastSection(false);
+        rnetHeader->setSectionResizeMode(QHeaderView::ResizeToContents);
+        rnetHeader->setSectionResizeMode(RNetFrameModel::ColCount, QHeaderView::Fixed);
+        m_rnetView->setColumnWidth(RNetFrameModel::ColCount, 72);
+        rnetHeader->setSectionResizeMode(RNetFrameModel::ColText, QHeaderView::Stretch);
+    }
+
+    // RNET_COUNT_R5_LAYOUT: keep Count visible directly after #.
+    if (m_rnetView && m_rnetView->horizontalHeader()) {
+        auto *rnetHeader = m_rnetView->horizontalHeader();
+        m_rnetView->showColumn(RNetFrameModel::ColCount);
+        rnetHeader->setStretchLastSection(false);
+        rnetHeader->setSectionResizeMode(QHeaderView::ResizeToContents);
+        rnetHeader->setSectionResizeMode(RNetFrameModel::ColCount, QHeaderView::Fixed);
+        m_rnetView->setColumnWidth(RNetFrameModel::ColCount, 72);
+        rnetHeader->setSectionResizeMode(RNetFrameModel::ColText, QHeaderView::Stretch);
+    }
+
+    // Count column is intentionally fixed: the Text column may stretch instead.
+    if (auto *rnetHeader = m_rnetView->horizontalHeader()) {
+        rnetHeader->setSectionResizeMode(QHeaderView::ResizeToContents);
+        rnetHeader->setStretchLastSection(false);
+        rnetHeader->setSectionResizeMode(RNetFrameModel::ColText, QHeaderView::Stretch);
+        rnetHeader->setSectionResizeMode(RNetFrameModel::ColCount, QHeaderView::Fixed);
+        m_rnetView->setColumnWidth(RNetFrameModel::ColCount, 70);
+    }
+    m_rnetView->setItemDelegateForColumn(RNetFrameModel::ColTag, new RNetFrameDelegate(m_rnetView));
 
     connect(m_rnetModel,
             &RNetFrameModel::tagStateChanged,
@@ -352,7 +389,7 @@ QGroupBox *MainWindow::createChannelGroup(const QString &title, ChannelWidgets &
 
 QGroupBox *MainWindow::createTransmitGroup()
 {
-    auto *box = new QGroupBox(QStringLiteral("Transmit"), this);
+    auto *box = new QGroupBox(QStringLiteral("Transmit (disabled/safety)"), this);
     auto *form = new QFormLayout(box);
 
     m_txChannel = new QComboBox(box);
@@ -363,6 +400,10 @@ QGroupBox *MainWindow::createTransmitGroup()
     m_txRemote = new QCheckBox(QStringLiteral("Remote frame"), box);
     m_txData = new QLineEdit(QStringLiteral("00 00 00 00 00 00 00 00"), box);
     m_sendBtn = new QPushButton(QStringLiteral("Send"), box);
+#if !QTRNET_ENABLE_DANGEROUS_TX
+    m_sendBtn->setEnabled(false);
+    m_sendBtn->setToolTip(QStringLiteral("TX disabled in safety build. Rebuild with -DQTRNET_ENABLE_DANGEROUS_TX=ON only for isolated lab wiring."));
+#endif
 
     form->addRow(QStringLiteral("Channel"), m_txChannel);
     form->addRow(QStringLiteral("CAN ID"), m_txId);
@@ -433,7 +474,10 @@ QWidget *MainWindow::createRNetTab()
     m_rnetView->setSortingEnabled(true);
     m_rnetView->verticalHeader()->setVisible(false);
     m_rnetView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    m_rnetView->horizontalHeader()->setStretchLastSection(true);
+    m_rnetView->horizontalHeader()->setStretchLastSection(false);
+    m_rnetView->horizontalHeader()->setSectionResizeMode(RNetFrameModel::ColText, QHeaderView::Stretch);
+    m_rnetView->horizontalHeader()->setSectionResizeMode(RNetFrameModel::ColCount, QHeaderView::Fixed);
+    m_rnetView->setColumnWidth(RNetFrameModel::ColCount, 70);
 
     layout->addLayout(top);
     layout->addWidget(m_rnetView);
@@ -738,6 +782,13 @@ void MainWindow::closeDevice()
 
 void MainWindow::sendFrame()
 {
+#if !QTRNET_ENABLE_DANGEROUS_TX
+    QMessageBox::warning(this,
+                         QStringLiteral("TX disabled"),
+                         QStringLiteral("CAN transmit is disabled in this safety build. Rebuild with -DQTRNET_ENABLE_DANGEROUS_TX=ON only on isolated lab wiring."));
+    return;
+#endif
+
     if (m_simulationMode) {
         QMessageBox::information(this,
                                  QStringLiteral("Simulation mode"),
@@ -776,7 +827,7 @@ void MainWindow::toggleLogging()
         return;
     }
 
-    const QString path = QFileDialog::getSaveFileName(this,
+    const QString path = QtraDeferredCsvFileDialog::getSaveFileName(this,
                                                       QStringLiteral("Save CSV log"),
                                                       QDir::homePath() + QStringLiteral("/controlcan_capture.csv"),
                                                       QStringLiteral("CSV Files (*.csv)"));
@@ -897,7 +948,7 @@ void MainWindow::onDeviceStateChanged(bool open)
     if (!m_simulationMode) {
         m_openBtn->setEnabled(!open);
         m_closeBtn->setEnabled(open);
-        m_sendBtn->setEnabled(open);
+        m_sendBtn->setEnabled(false);
     }
     if (!open) {
         setStatusLamp(m_ch0.state, QStringLiteral("closed"), QStringLiteral("#666"));
@@ -907,12 +958,12 @@ void MainWindow::onDeviceStateChanged(bool open)
 
 void MainWindow::selectSimulationSource()
 {
-    const QString path = QFileDialog::getOpenFileName(this,
+    const QString path = QFileDialog::getOpenFileName(this/*,
                                                       QStringLiteral("Select simulation source"),
                                                       m_inputFile.isEmpty() ? QDir::homePath() : m_inputFile,
                                                       QStringLiteral("Simulation sources (*.txt *.log *.candump *.lua);;"
                                                                      "Candump text (*.txt *.log *.candump);;"
-                                                                     "Lua scripts (*.lua);;All files (*)"));
+                                                                     "Lua scripts (*.lua);;All files (*)")*/);
     if (path.isEmpty())
         return;
 
