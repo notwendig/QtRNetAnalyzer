@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "rnetsortfilterproxymodel.h"
 #include "deferredcsvfiledialog.h"
 
 #include "liveframedelegate.h"
@@ -46,6 +47,7 @@
 #include <QVBoxLayout>
 
 #include <utility>
+#include <QAbstractItemModel>
 
 // QT6_TRANSLATION_ONLY: translations use Qt6 QTranslator/LanguageChange only; no global widget pointer pass.
 
@@ -65,8 +67,7 @@ constexpr BitrateItem kBitrates[] = {
     {"250 kbit/s", 0x01, 0x1C},
     {"125 kbit/s (R-Net)", 0x03, 0x1C},
     {"100 kbit/s", 0x04, 0x1C},
-    {"50 kbit/s", 0x09, 0x1C},
-};
+    {"50 kbit/s", 0x09, 0x1C}};
 
 QString formatFrameTypeLocal(const CanFrame &frame)
 {
@@ -127,6 +128,90 @@ direction_t detectSimulationDirection(const QString &line)
 }
 } // namespace
 
+
+namespace {
+
+void qtraFitRNetViewColumns(QTableView *view)
+{
+    if (!view)
+        return;
+
+    auto *header = view->horizontalHeader();
+    if (!header)
+        return;
+
+    const QAbstractItemModel *model = view->model();
+    const int columnCount = model ? model->columnCount() : header->count();
+
+    view->setWordWrap(false);
+    view->setTextElideMode(Qt::ElideRight);
+    header->setStretchLastSection(false);
+    header->setSectionsMovable(false);
+    header->setMinimumSectionSize(22);
+    header->setDefaultSectionSize(80);
+    header->setDefaultAlignment(Qt::AlignCenter);
+
+    auto labelForColumn = [&](int column) -> QString {
+        if (!model)
+            return {};
+        return model->headerData(column, Qt::Horizontal, Qt::DisplayRole)
+            .toString()
+            .trimmed()
+            .toLower();
+    };
+
+    auto setFixed = [&](int column, int width) {
+        if (column < 0 || column >= columnCount)
+            return;
+        header->setSectionResizeMode(column, QHeaderView::Fixed);
+        header->resizeSection(column, width);
+    };
+
+    auto setStretch = [&](int column, int minWidth) {
+        if (column < 0 || column >= columnCount)
+            return;
+        header->setSectionResizeMode(column, QHeaderView::Stretch);
+        header->resizeSection(column, minWidth);
+    };
+
+    // Fit the whole R-Net table into the visible viewport:
+    // compact fixed widths for numeric/control columns, stretch for textual columns.
+    for (int column = 0; column < columnCount; ++column) {
+        const QString label = labelForColumn(column);
+
+        if (label == QStringLiteral("plot")) {
+            setFixed(column, 42);
+        } else if (label == QStringLiteral("#")) {
+            setFixed(column, 44);
+        } else if (label == QStringLiteral("count")) {
+            setFixed(column, 64);
+        } else if (label == QStringLiteral("id")) {
+            setFixed(column, 94);
+        } else if (label == QStringLiteral("ext")) {
+            setFixed(column, 42);
+        } else if (label == QStringLiteral("rtr")) {
+            setFixed(column, 42);
+        } else if (label == QStringLiteral("timestamp") || label == QStringLiteral("zeitstempel")) {
+            setFixed(column, 118);
+        } else if (label == QStringLiteral("data") || label == QStringLiteral("daten")) {
+            setStretch(column, 130);
+        } else if (label == QStringLiteral("name")) {
+            setStretch(column, 160);
+        } else if (label == QStringLiteral("id parts") || label == QStringLiteral("id-part") || label == QStringLiteral("id-parts")) {
+            setStretch(column, 120);
+        } else if (label == QStringLiteral("fields") || label == QStringLiteral("felder")) {
+            setStretch(column, 190);
+        } else if (label == QStringLiteral("text") || label == QStringLiteral("beschreibung")) {
+            setStretch(column, 220);
+        } else {
+            // Unknown/new columns should remain visible, not force a scrollbar.
+            setStretch(column, 120);
+        }
+    }
+}
+
+} // namespace
+
 MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
     : QMainWindow(parent)
     , m_inputFile(inputFile)
@@ -150,7 +235,7 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
     m_liveProxy->setSourceModel(m_liveModel);
     m_liveProxy->setDynamicSortFilter(false);
 
-    m_rnetProxy = new QSortFilterProxyModel(this);
+    m_rnetProxy = new RNetSortFilterProxyModel(this);
     m_rnetProxy->setSourceModel(m_rnetModel);
     m_rnetProxy->setDynamicSortFilter(false);
 
@@ -158,15 +243,84 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
     m_liveView->setItemDelegate(new LiveFrameDelegate(m_liveView));
 
     m_rnetView->setModel(m_rnetProxy);
+    // RNET_TEXT_TOOLTIP_HIDE_COLTEXT: Text remains available via ToolTipRole.
+    // QTRA_RNET_COLUMNS_CANONICAL: model order is canonical; no visual moveSection hacks.
+    if (auto *rnetHeader = m_rnetView->horizontalHeader()) {
+        rnetHeader->setStretchLastSection(false);
+        rnetHeader->setSectionResizeMode(QHeaderView::Interactive);
+
+        const auto qtraSetRNetColumn = [rnetHeader](int col, QHeaderView::ResizeMode mode, int width) {
+            rnetHeader->setSectionResizeMode(col, mode);
+            if (width > 0)
+                rnetHeader->resizeSection(col, width);
+        };
+
+        qtraSetRNetColumn(0, QHeaderView::Fixed, 46);
+        qtraSetRNetColumn(1, QHeaderView::Fixed, 48);
+        qtraSetRNetColumn(RNetFrameModel::ColCount, QHeaderView::Interactive, 76);
+        qtraSetRNetColumn(RNetFrameModel::ColId, QHeaderView::Interactive, 110);
+        qtraSetRNetColumn(RNetFrameModel::ColName, QHeaderView::Stretch, 0);
+        qtraSetRNetColumn(RNetFrameModel::ColIdParts, QHeaderView::Stretch, 0);
+        qtraSetRNetColumn(RNetFrameModel::ColFields, QHeaderView::Stretch, 0);
+        qtraSetRNetColumn(RNetFrameModel::ColData, QHeaderView::Stretch, 0);
+        qtraSetRNetColumn(RNetFrameModel::ColExt, QHeaderView::Fixed, 52);
+        qtraSetRNetColumn(RNetFrameModel::ColRtr, QHeaderView::Fixed, 52);
+        qtraSetRNetColumn(RNetFrameModel::ColTimestamp, QHeaderView::Interactive, 135);
+    }
+
+
+    // RNET_HIDE_TEXT_COLUMN_TOOLTIP_PATCH: the verbose Text column is no longer
+    // shown as a wide last column. Its content is available as mouseover via
+    // RNetFrameModel::data(Qt::ToolTipRole).
+    m_rnetView->setMouseTracking(true);
+    qtraFitRNetViewColumns(m_rnetView);
     // RNET_COUNT_R6_LAYOUT: keep Count visible directly after #.
     if (m_rnetView && m_rnetView->horizontalHeader()) {
         auto *rnetHeader = m_rnetView->horizontalHeader();
+// QTRA_RNET_COLUMN_FIT_BEGIN
+    rnetHeader->setStretchLastSection(false);
+    rnetHeader->setSectionsMovable(true);
+
+    auto qtraSetRNetColumn = [rnetHeader](int col, QHeaderView::ResizeMode mode, int width = -1) {
+        if (col < 0)
+            return;
+        rnetHeader->setSectionResizeMode(col, mode);
+        if (width > 0)
+            rnetHeader->resizeSection(col, width);
+    };
+
+    // Visible order is controlled by RNetFrameModel's enum:
+    // Plot | # | Count | ID | Name | ID parts | Fields | Data | Ext | RTR | Timestamp | Text(hidden)
+    qtraSetRNetColumn(0, QHeaderView::Fixed, 44);
+    qtraSetRNetColumn(1, QHeaderView::Fixed, 48);
+    qtraSetRNetColumn(RNetFrameModel::ColCount, QHeaderView::Fixed, 72);
+    qtraSetRNetColumn(RNetFrameModel::ColId, QHeaderView::Fixed, 104);
+    qtraSetRNetColumn(RNetFrameModel::ColName, QHeaderView::Stretch);
+    qtraSetRNetColumn(RNetFrameModel::ColIdParts, QHeaderView::Stretch);
+    qtraSetRNetColumn(RNetFrameModel::ColFields, QHeaderView::Stretch);
+    qtraSetRNetColumn(RNetFrameModel::ColData, QHeaderView::Stretch);
+    qtraSetRNetColumn(RNetFrameModel::ColExt, QHeaderView::Fixed, 46);
+    qtraSetRNetColumn(RNetFrameModel::ColTimestamp, QHeaderView::Interactive, 135);
+
+    // RTR has different enum names in older local variants; find it by visible header text.
+    for (int c = 0; c < m_rnetModel->columnCount(); ++c) {
+        const QString header = m_rnetModel->headerData(c, Qt::Horizontal, Qt::DisplayRole).toString().trimmed();
+        if (header.compare(QStringLiteral("RTR"), Qt::CaseInsensitive) == 0) {
+            qtraSetRNetColumn(c, QHeaderView::Fixed, 46);
+            break;
+        }
+    }
+
+    // Full text is available as mouse-over tooltip; keep the last Text column hidden.
+// QTRA_RNET_COLUMN_FIT_END
         m_rnetView->showColumn(RNetFrameModel::ColCount);
         rnetHeader->setStretchLastSection(false);
         rnetHeader->setSectionResizeMode(QHeaderView::ResizeToContents);
         rnetHeader->setSectionResizeMode(RNetFrameModel::ColCount, QHeaderView::Fixed);
         m_rnetView->setColumnWidth(RNetFrameModel::ColCount, 72);
-        rnetHeader->setSectionResizeMode(RNetFrameModel::ColText, QHeaderView::Stretch);
+        rnetHeader->setSectionResizeMode(RNetFrameModel::ColIdParts, QHeaderView::Interactive);
+        rnetHeader->resizeSection(RNetFrameModel::ColIdParts, 170);
+    m_rnetView->setColumnWidth(RNetFrameModel::ColFields, 220);
     }
 
     // RNET_COUNT_R5_LAYOUT: keep Count visible directly after #.
@@ -177,18 +331,40 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
         rnetHeader->setSectionResizeMode(QHeaderView::ResizeToContents);
         rnetHeader->setSectionResizeMode(RNetFrameModel::ColCount, QHeaderView::Fixed);
         m_rnetView->setColumnWidth(RNetFrameModel::ColCount, 72);
-        rnetHeader->setSectionResizeMode(RNetFrameModel::ColText, QHeaderView::Stretch);
     }
 
     // Count column is intentionally fixed: the Text column may stretch instead.
     if (auto *rnetHeader = m_rnetView->horizontalHeader()) {
         rnetHeader->setSectionResizeMode(QHeaderView::ResizeToContents);
         rnetHeader->setStretchLastSection(false);
-        rnetHeader->setSectionResizeMode(RNetFrameModel::ColText, QHeaderView::Stretch);
         rnetHeader->setSectionResizeMode(RNetFrameModel::ColCount, QHeaderView::Fixed);
+    // QTRA_RNET_FIT_COLUMNS_BEGIN
+    // R-Net table geometry: numeric/status columns stay compact; text columns share the remaining width.
+    // Important: Timestamp must NOT stretch, otherwise it consumes the whole view width.
+    rnetHeader->setStretchLastSection(false);
+
+    auto qtraSetRNetColumn = [&](int column, QHeaderView::ResizeMode mode, int width = -1) {
+        rnetHeader->setSectionResizeMode(column, mode);
+        if (width > 0)
+            rnetHeader->resizeSection(column, width);
+    };
+
+    qtraSetRNetColumn(0, QHeaderView::Fixed, 48);
+    qtraSetRNetColumn(1, QHeaderView::Fixed, 54);
+    qtraSetRNetColumn(RNetFrameModel::ColCount, QHeaderView::Fixed, 74);
+    qtraSetRNetColumn(RNetFrameModel::ColId, QHeaderView::Fixed, 112);
+    qtraSetRNetColumn(RNetFrameModel::ColExt, QHeaderView::Fixed, 46);
+    qtraSetRNetColumn(7, QHeaderView::Fixed, 50);
+    qtraSetRNetColumn(RNetFrameModel::ColTimestamp, QHeaderView::Interactive, 135);
+
+    qtraSetRNetColumn(RNetFrameModel::ColName, QHeaderView::Stretch);
+    qtraSetRNetColumn(RNetFrameModel::ColData, QHeaderView::Stretch);
+    qtraSetRNetColumn(RNetFrameModel::ColIdParts, QHeaderView::Stretch);
+    qtraSetRNetColumn(RNetFrameModel::ColFields, QHeaderView::Stretch);
+    // QTRA_RNET_FIT_COLUMNS_END
         m_rnetView->setColumnWidth(RNetFrameModel::ColCount, 70);
     }
-    m_rnetView->setItemDelegateForColumn(RNetFrameModel::ColTag, new RNetFrameDelegate(m_rnetView));
+    m_rnetView->setItemDelegateForColumn(0, new RNetFrameDelegate(m_rnetView));
 
     connect(m_rnetModel,
             &RNetFrameModel::tagStateChanged,
@@ -255,6 +431,68 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
     }
 
     updateSimulationActions();
+
+
+    // QTRA_RNET_COLUMN_VISIBILITY_MENU_BEGIN
+    // Right-click the R-Net view header to toggle column visibility.
+    // Uses the view/model dynamically, so it stays valid when columns are added,
+    // reordered, hidden, or provided by the proxy model.
+    if (m_rnetView && m_rnetView->horizontalHeader()) {
+        auto *rnetVisibilityHeader = m_rnetView->horizontalHeader();
+        rnetVisibilityHeader->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(rnetVisibilityHeader, &QHeaderView::customContextMenuRequested,
+                this,
+                [this, rnetVisibilityHeader](const QPoint &pos) {
+                    if (!m_rnetView || !m_rnetView->model())
+                        return;
+
+                    QMenu menu(this);
+                    menu.setTitle(tr("R-Net columns"));
+
+                    QAction *showAll = menu.addAction(tr("Show all columns"));
+                    showAll->setData(-1);
+                    menu.addSeparator();
+
+                    const int columnCount = m_rnetView->model()->columnCount();
+                    for (int col = 0; col < columnCount; ++col) {
+                        QString label = m_rnetView->model()
+                                            ->headerData(col, Qt::Horizontal, Qt::DisplayRole)
+                                            .toString()
+                                            .trimmed();
+                        if (label.isEmpty())
+                            label = tr("Column %1").arg(col + 1);
+
+                        QAction *action = menu.addAction(label);
+                        action->setCheckable(true);
+                        action->setChecked(!m_rnetView->isColumnHidden(col));
+                        action->setData(col);
+                    }
+
+                    QAction *chosen = menu.exec(rnetVisibilityHeader->mapToGlobal(pos));
+                    if (!chosen)
+                        return;
+
+                    const int chosenColumn = chosen->data().toInt();
+                    if (chosenColumn < 0) {
+                        for (int col = 0; col < columnCount; ++col)
+                            m_rnetView->setColumnHidden(col, false);
+                        return;
+                    }
+
+                    int visibleColumns = 0;
+                    for (int col = 0; col < columnCount; ++col) {
+                        if (!m_rnetView->isColumnHidden(col))
+                            ++visibleColumns;
+                    }
+
+                    const bool currentlyHidden = m_rnetView->isColumnHidden(chosenColumn);
+                    if (!currentlyHidden && visibleColumns <= 1)
+                        return; // Do not hide the last visible column.
+
+                    m_rnetView->setColumnHidden(chosenColumn, !currentlyHidden);
+                });
+    }
+    // QTRA_RNET_COLUMN_VISIBILITY_MENU_END
 }
 
 MainWindow::~MainWindow()
@@ -438,7 +676,7 @@ QWidget *MainWindow::createLiveTab()
     m_liveView->setSortingEnabled(true);
     m_liveView->verticalHeader()->setVisible(false);
     m_liveView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    m_liveView->horizontalHeader()->setStretchLastSection(true);
+    m_liveView->horizontalHeader()->setStretchLastSection(false);
 
     layout->addWidget(m_liveView);
     return w;
@@ -478,7 +716,6 @@ QWidget *MainWindow::createRNetTab()
     m_rnetView->verticalHeader()->setVisible(false);
     m_rnetView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_rnetView->horizontalHeader()->setStretchLastSection(false);
-    m_rnetView->horizontalHeader()->setSectionResizeMode(RNetFrameModel::ColText, QHeaderView::Stretch);
     m_rnetView->horizontalHeader()->setSectionResizeMode(RNetFrameModel::ColCount, QHeaderView::Fixed);
     m_rnetView->setColumnWidth(RNetFrameModel::ColCount, 70);
 

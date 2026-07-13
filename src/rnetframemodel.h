@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QSet>
 #include <QString>
+#include <QVector>
 
 #include <memory>
 #include <vector>
@@ -17,23 +18,33 @@ class RNetFrameModel final : public QAbstractTableModel
 {
     Q_OBJECT
 
-  public:
+public:
     explicit RNetFrameModel(QObject *parent = nullptr);
     ~RNetFrameModel() override = default;
 
     enum Column
     {
-        ColTag = 0,
-        ColIndex,
-        ColCount,
-        ColId,
-        ColName,
-        ColData,
-        ColExt,
-        ColRtr,
-        ColTimestamp,
-        ColText,
-        ColumnCount
+        ColPlot = 0,
+        ColCheck = ColPlot,
+
+        ColRow = 1,
+        ColNumber = ColRow,
+        ColIndex = ColRow,
+        ColNo = ColRow,
+
+        ColCount = 2,
+        ColId = 3,
+        ColID = ColId,
+        ColName = 4,
+        ColIdParts = 5,
+        ColIDParts = ColIdParts,
+        ColFields = 6,
+        ColData = 7,
+        ColExt = 8,
+        ColRTR = 9,
+        ColRtr = ColRTR,
+        ColTimestamp = 10,
+        ColumnCount = 11
     };
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
@@ -52,13 +63,12 @@ class RNetFrameModel final : public QAbstractTableModel
     QString nameForKey(quint64 key) const;
     bool isTagged(quint64 key) const { return m_taggedKeys.contains(key); }
 
-  signals:
+signals:
     void tagStateChanged(quint64 key, const QString &name, bool enabled);
     void taggedFrameReceived(quint64 key, const QString &name, const CanFrame &frame);
 
-  private:
-    struct RowBucket
-    {
+private:
+    struct RowBucket {
         quint64 key = 0;
         quint64 totalCount = 0;
         std::vector<std::unique_ptr<RNetFrame>> history;
@@ -66,12 +76,16 @@ class RNetFrameModel final : public QAbstractTableModel
         bool throttleStarted = false;
     };
 
-  private:
+private:
     static QString formatPayload(const QByteArray &data);
+    static QString idPartsString(const RNetFrame &frame);
+    static QString fieldsString(const RNetFrame &frame);
+    static QString sortString(QString value);
+
     static constexpr std::size_t kMaxHistoryPerRow = 2000;
     static constexpr qint64 kUiUpdateIntervalMs = 80;
 
-  private:
+private:
     std::vector<RowBucket> m_rows;
     QHash<quint64, int> m_rowByKey;
     QSet<quint64> m_taggedKeys;

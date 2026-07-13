@@ -45,6 +45,8 @@ set(QTRNET_SOURCES
   src/liveframemodel.h
   src/rnetframedelegate.cpp
   src/rnetframedelegate.h
+  src/rnetsortfilterproxymodel.cpp
+  src/rnetsortfilterproxymodel.h
   src/rnetframemodel.cpp
   src/rnetframemodel.h
   src/rnetframesimulator.cpp

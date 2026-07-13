@@ -1,0 +1,72 @@
+Generated: 2026-07-13T20:25:01+02:00
+Diagnostic build for Grok. Build failure is recorded but docs may still be pushed.
+
++ git submodule sync --recursive
+Synchronisiere Submodul-URL für 'external/RNetMsgBroker'
+rc=0
+
++ git submodule update --init --recursive
+rc=0
+
++ rm -rf build/Desktop_Debug
+rc=0
+
++ cmake -S . -B build/Desktop_Debug -DCMAKE_BUILD_TYPE=Debug
+-- The CXX compiler identification is GNU 16.1.1
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/lib64/ccache/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Performing Test HAVE_STDATOMIC
+-- Performing Test HAVE_STDATOMIC - Success
+-- Found WrapAtomic: TRUE
+-- Found OpenGL: /usr/lib64/libOpenGL.so
+-- Found WrapOpenGL: TRUE
+-- Found WrapVulkanHeaders: /usr/include
+-- Linux SocketCAN backend enabled. Use waveUSBCAN_b DKMS driver to expose can0/can1.
+-- Configuring done (2.1s)
+-- Generating done (0.1s)
+-- Build files have been written to: /home/juergen/AndroidStudioProjects/QtRNetAnalyzer/build/Desktop_Debug
+cmake_config_rc=0
+
++ cmake --build build/Desktop_Debug -j16
+[  0%] Built target RNetMsgBroker_autogen_timestamp_deps
+[  3%] Generating QtRNetAnalyzer_de_DE.qm
+Updating '/home/juergen/AndroidStudioProjects/QtRNetAnalyzer/build/Desktop_Debug/QtRNetAnalyzer_de_DE.qm'...
+    Generated 181 translation(s) (181 finished and 0 unfinished)
+[  7%] Automatic MOC and UIC for target RNetMsgBroker
+[  7%] Built target QtRNetAnalyzer_lrelease
+[  7%] Built target RNetMsgBroker_autogen
+[ 17%] Building CXX object external/RNetMsgBroker/CMakeFiles/RNetMsgBroker.dir/src/rnetframe.cpp.o
+[ 17%] Building CXX object external/RNetMsgBroker/CMakeFiles/RNetMsgBroker.dir/src/rnetmsgbroker.cpp.o
+[ 17%] Building CXX object external/RNetMsgBroker/CMakeFiles/RNetMsgBroker.dir/RNetMsgBroker_autogen/mocs_compilation.cpp.o
+[ 21%] Linking CXX shared library libRNetMsgBroker.so
+[ 25%] Built target RNetMsgBroker
+[ 25%] Built target QtRNetAnalyzer_autogen_timestamp_deps
+[ 28%] Automatic MOC and UIC for target QtRNetAnalyzer
+[ 28%] Built target QtRNetAnalyzer_autogen
+[ 32%] Running rcc for resource QtRNetAnalyzer_translations
+[ 42%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/main.cpp.o
+[ 42%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/appsettingscontroller.cpp.o
+[ 42%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/QtRNetAnalyzer_autogen/mocs_compilation.cpp.o
+[ 50%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/mainwindow.cpp.o
+[ 50%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/controlcandeviceworker.cpp.o
+[ 57%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/canlogger.cpp.o
+[ 57%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/liveframedelegate.cpp.o
+[ 60%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/liveframemodel.cpp.o
+[ 64%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/rnetsortfilterproxymodel.cpp.o
+[ 67%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/rnetframedelegate.cpp.o
+[ 75%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/rnetwheelchairsimulator.cpp.o
+[ 75%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/rnetframemodel.cpp.o
+[ 78%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/rnetframesimulator.cpp.o
+[ 82%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/signalhistorymodel.cpp.o
+[ 85%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/signalplotwidget.cpp.o
+[ 89%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/src/signalviewwindow.cpp.o
+[ 92%] Building CXX object CMakeFiles/QtRNetAnalyzer.dir/build/Desktop_Debug/.qt/rcc/qrc_QtRNetAnalyzer_translations.cpp.o
+[ 96%] Linking CXX executable QtRNetAnalyzer
+[100%] Built target QtRNetAnalyzer
+cmake_build_rc=0

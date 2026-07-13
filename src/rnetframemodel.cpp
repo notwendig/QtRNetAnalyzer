@@ -1,6 +1,68 @@
 #include "rnetframemodel.h"
 
-#include <QString>
+#include <QRegularExpression>
+#include <QStringList>
+#include <QtGlobal>
+
+#include <algorithm>
+
+namespace {
+
+QString textWithoutMetadata(QString text)
+{
+    const int brace = text.indexOf(QLatin1Char('{'));
+    if (brace >= 0)
+        text = text.left(brace);
+    return text.trimmed();
+}
+
+QVector<QPair<QString, QString>> decodedPairsFromText(const RNetFrame &frame)
+{
+    QVector<QPair<QString, QString>> out;
+
+    if (frame.name().compare(QStringLiteral("UNKNOWN"), Qt::CaseInsensitive) == 0)
+        return out;
+
+    const QString text = textWithoutMetadata(frame.toString());
+    static const QRegularExpression rx(QStringLiteral(R"(([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;,\)]+))"));
+
+    auto it = rx.globalMatch(text);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        QString key = m.captured(1).trimmed();
+        QString value = m.captured(2).trimmed();
+        if (key.isEmpty() || value.isEmpty())
+            continue;
+        out.push_back({key, value});
+    }
+
+    return out;
+}
+
+bool isIdPartKey(const QString &key)
+{
+    const QString k = key.toLower();
+    return k == QStringLiteral("module")
+        || k == QStringLiteral("device")
+        || k == QStringLiteral("node")
+        || k == QStringLiteral("address")
+        || k == QStringLiteral("src")
+        || k == QStringLiteral("dst");
+}
+
+QString joinPairs(const QVector<QPair<QString, QString>> &pairs, bool wantIdParts)
+{
+    QStringList parts;
+    for (const auto &p : pairs) {
+        const bool isId = isIdPartKey(p.first);
+        if (isId != wantIdParts)
+            continue;
+        parts << QStringLiteral("%1=%2").arg(p.first, p.second);
+    }
+    return parts.join(QStringLiteral("; "));
+}
+
+} // namespace
 
 RNetFrameModel::RNetFrameModel(QObject *parent)
     : QAbstractTableModel(parent)
@@ -11,45 +73,102 @@ int RNetFrameModel::rowCount(const QModelIndex &parent) const
 {
     if (parent.isValid())
         return 0;
-
     return static_cast<int>(m_rows.size());
 }
 
 int RNetFrameModel::columnCount(const QModelIndex &parent) const
 {
-    if (parent.isValid())
-        return 0;
-
+    Q_UNUSED(parent)
     return ColumnCount;
 }
+
 
 QVariant RNetFrameModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
     if (orientation != Qt::Horizontal || role != Qt::DisplayRole)
         return {};
 
-    switch (section)
-    {
-    case ColTag:       return QStringLiteral("Plot");
-    case ColIndex:     return QStringLiteral("#");
-    case ColId:        return QStringLiteral("ID");
-    case ColName:      return QStringLiteral("Name");
-    case ColData:      return QStringLiteral("Data");
-    case ColExt:       return QStringLiteral("Ext");
-    case ColRtr:       return QStringLiteral("RTR");
-    case ColTimestamp: return QStringLiteral("Timestamp");
+    switch (section) {
+    case ColPlot:
+        return QStringLiteral("");
+    case ColRow:
+        return QStringLiteral("#");
     case ColCount:
         return QStringLiteral("Count");
-    case ColText:      return QStringLiteral("Text");
-    default:           return {};
+    case ColId:
+        return QStringLiteral("ID");
+    case ColName:
+        return QStringLiteral("Name");
+    case ColIdParts:
+        return QStringLiteral("ID parts");
+    case ColFields:
+        return QStringLiteral("Fields");
+    case ColData:
+        return QStringLiteral("Data");
+    case ColExt:
+        return QStringLiteral("Ext");
+    case ColRTR:
+        return QStringLiteral("RTR");
+    case ColTimestamp:
+        return QStringLiteral("Timestamp");
+    default:
+        return {};
     }
 }
 
+
 QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
 {
+    // QTRA_CANONICAL_EXT_RTR_TIMESTAMP_DATA
+    // Hard override for the final three real columns after Text was removed
+    // from the model.  These columns must not depend on the former ColText
+    // mapping or on view visibility state.
+    if (index.isValid()
+        && index.row() >= 0
+        && index.row() < rowCount()
+        && (role == Qt::ToolTipRole
+            || index.column() == ColExt
+            || index.column() == ColRTR
+            || index.column() == ColTimestamp)) {
+        const RNetFrame *qtraFrame = latestFrameAt(index.row());
+        if (!qtraFrame)
+            return {};
+
+        if (role == Qt::ToolTipRole)
+            return qtraFrame->toString();
+
+        if (role == Qt::TextAlignmentRole)
+            return Qt::AlignCenter;
+
+        if (role == Qt::UserRole) {
+            switch (index.column()) {
+            case ColExt:
+                return qtraFrame->extended ? 1 : 0;
+            case ColRTR:
+                return qtraFrame->remote ? 1 : 0;
+            case ColTimestamp:
+                return QVariant::fromValue<double>(static_cast<double>(qtraFrame->hwTimestamp));
+            default:
+                break;
+            }
+        }
+
+        if (role == Qt::DisplayRole || role == Qt::EditRole) {
+            switch (index.column()) {
+            case ColExt:
+                return qtraFrame->extended ? QStringLiteral("EXT") : QStringLiteral("STD");
+            case ColRTR:
+                return qtraFrame->remote ? QStringLiteral("RTR") : QString();
+            case ColTimestamp:
+                return QString::number(static_cast<qulonglong>(qtraFrame->hwTimestamp));
+            default:
+                break;
+            }
+        }
+    }
+
     if (!index.isValid())
         return {};
-
     if (index.row() < 0 || index.row() >= static_cast<int>(m_rows.size()))
         return {};
 
@@ -61,62 +180,114 @@ QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
     if (!frame)
         return {};
 
-    if (role == Qt::CheckStateRole && index.column() == ColTag)
-        return m_taggedKeys.contains(bucket.key) ? Qt::Checked : Qt::Unchecked;
+    // QTRA_RNET_EXT_RTR_TIMESTAMP_FIX:
+    // Text ist keine sichtbare Spalte mehr. Der Volltext wird ausschließlich
+    // als Tooltip geliefert. Ext/RTR/Timestamp werden hier hart an ihre
+    // kanonischen Spalten gebunden, damit ein versteckter Tooltip/Text keine
+    // nachfolgenden Spalten mehr verschieben oder leeren kann.
+    if (role == Qt::ToolTipRole)
+        return frame->toString();
 
-    if (role == Qt::TextAlignmentRole)
-    {
-        if (index.column() == ColTag ||
-            index.column() == ColIndex ||
-            index.column() == ColExt ||
-            index.column() == ColRtr ||
-            index.column() == ColTimestamp ||
-            index.column() == ColCount)
-        {
-            return QVariant::fromValue(int(Qt::AlignRight | Qt::AlignVCenter));
+    if (role == Qt::DisplayRole || role == Qt::EditRole) {
+        const auto &qtraCan = *frame;
+        switch (index.column()) {
+        case ColExt:
+            return qtraCan.extended ? QStringLiteral("EXT") : QStringLiteral("STD");
+        case ColRTR:
+            return qtraCan.remote ? QStringLiteral("RTR") : QString();
+        case ColTimestamp:
+            if (qtraCan.hwTimestamp != 0)
+                return QString::number(double(qtraCan.hwTimestamp) / 1000.0, 'f', 3);
+            return QString();
+        default:
+            break;
         }
-
-        return QVariant::fromValue(int(Qt::AlignLeft | Qt::AlignVCenter));
     }
 
-    if (role != Qt::DisplayRole)
+    if (role == Qt::UserRole) {
+        const auto &qtraCan = *frame;
+        switch (index.column()) {
+        case ColExt:
+            return qtraCan.extended ? 1 : 0;
+        case ColRTR:
+            return qtraCan.remote ? 1 : 0;
+        case ColTimestamp:
+            return QVariant::fromValue<qulonglong>(qtraCan.hwTimestamp);
+        default:
+            break;
+        }
+    }
+
+
+    if (role == Qt::CheckStateRole && index.column() == ColPlot)
+        return m_taggedKeys.contains(bucket.key) ? Qt::Checked : Qt::Unchecked;
+
+    if (role == Qt::ToolTipRole)
+        return frame->toString();
+
+    if (role == Qt::TextAlignmentRole) {
+        if (role == Qt::ToolTipRole)
+            return frame->toString();
+
+        switch (index.column()) {
+        case ColPlot:
+        case ColIndex:
+        case ColCount:
+        case ColExt:
+        case ColRtr:
+        case ColTimestamp:
+            return QVariant::fromValue(int(Qt::AlignRight | Qt::AlignVCenter));
+        default:
+            return QVariant::fromValue(int(Qt::AlignLeft | Qt::AlignVCenter));
+        }
+    }
+
+    if (role == Qt::UserRole) {
+        switch (index.column()) {
+        case ColPlot: return m_taggedKeys.contains(bucket.key) ? 1 : 0;
+        case ColIndex: return index.row() + 1;
+        case ColCount: return QVariant::fromValue<qulonglong>(bucket.totalCount);
+        case ColId: return QVariant::fromValue<qulonglong>(frame->id);
+        case ColName: return sortString(frame->name());
+        case ColIdParts: return sortString(idPartsString(*frame));
+        case ColFields: return sortString(fieldsString(*frame));
+        case ColData: return sortString(formatPayload(frame->data));
+        case ColExt: return frame->extended ? 1 : 0;
+        case ColRtr: return frame->remote ? 1 : 0;
+        case ColTimestamp: return QVariant::fromValue<double>(static_cast<double>(frame->hwTimestamp));
+
+        default: return {};
+        }
+    }
+
+    if (role != Qt::DisplayRole && role != Qt::ToolTipRole)
         return {};
 
-    switch (index.column())
-    {
-    case ColTag:
+    switch (index.column()) {
+    case ColPlot:
         return {};
-
     case ColIndex:
         return index.row() + 1;
-
+    case ColCount:
+        return QString::number(static_cast<qulonglong>(bucket.totalCount));
     case ColId:
         return QStringLiteral("0x%1")
             .arg(frame->id, frame->extended ? 8 : 3, 16, QLatin1Char('0'))
             .toUpper();
-
     case ColName:
         return frame->name();
-
+    case ColIdParts:
+        return idPartsString(*frame);
+    case ColFields:
+        return fieldsString(*frame);
     case ColData:
         return formatPayload(frame->data);
-
     case ColExt:
         return frame->extended ? QStringLiteral("1") : QStringLiteral("0");
-
     case ColRtr:
         return frame->remote ? QStringLiteral("1") : QStringLiteral("0");
-
     case ColTimestamp:
-        return QString::number(frame->hwTimestamp, 'f', 6);
-
-    case ColCount:
-
-        return QString::number(static_cast<qulonglong>(bucket.totalCount));
-
-    case ColText:
-        return frame->toString();
-
+        return QString::number(static_cast<double>(frame->hwTimestamp), 'f', 6);
     default:
         return {};
     }
@@ -125,7 +296,7 @@ QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
 Qt::ItemFlags RNetFrameModel::flags(const QModelIndex &index) const
 {
     Qt::ItemFlags f = QAbstractTableModel::flags(index);
-    if (index.isValid() && index.column() == ColTag) {
+    if (index.isValid() && index.column() == ColPlot) {
         f |= Qt::ItemIsUserCheckable;
         f &= ~Qt::ItemIsEditable;
     }
@@ -134,22 +305,20 @@ Qt::ItemFlags RNetFrameModel::flags(const QModelIndex &index) const
 
 bool RNetFrameModel::setData(const QModelIndex &index, const QVariant &value, int role)
 {
-    if (!index.isValid() || index.column() != ColTag || role != Qt::CheckStateRole)
+    if (!index.isValid() || index.column() != ColPlot || role != Qt::CheckStateRole)
         return false;
-
     if (index.row() < 0 || index.row() >= static_cast<int>(m_rows.size()))
         return false;
 
     const RowBucket &bucket = m_rows[static_cast<std::size_t>(index.row())];
     const bool enabled = value.toInt() == Qt::Checked;
-
     if (enabled)
         m_taggedKeys.insert(bucket.key);
     else
         m_taggedKeys.remove(bucket.key);
 
     const QString name = nameForKey(bucket.key);
-    emit dataChanged(index, index, {Qt::CheckStateRole});
+    emit dataChanged(index, index, {Qt::CheckStateRole, Qt::DisplayRole, Qt::UserRole});
     emit tagStateChanged(bucket.key, name, enabled);
     return true;
 }
@@ -171,12 +340,10 @@ void RNetFrameModel::addFrame(const CanFrame &frame)
 
     const quint64 key = decoded->getKey();
     const QString name = decoded->name();
+
     auto it = m_rowByKey.find(key);
-
-    if (it == m_rowByKey.end())
-    {
+    if (it == m_rowByKey.end()) {
         const int row = static_cast<int>(m_rows.size());
-
         beginInsertRows(QModelIndex(), row, row);
 
         RowBucket bucket;
@@ -185,44 +352,33 @@ void RNetFrameModel::addFrame(const CanFrame &frame)
         bucket.updateThrottle.start();
         bucket.throttleStarted = true;
         bucket.history.push_back(std::move(decoded));
-
         m_rows.push_back(std::move(bucket));
         m_rowByKey.insert(key, row);
 
         endInsertRows();
-        // RNET_COUNT_R6_INSERT_REFRESH
-        emit dataChanged(index(row, ColCount), index(row, ColCount), {Qt::DisplayRole});
-        // RNET_COUNT_R5_INSERT_REFRESH
-        emit dataChanged(index(row, ColCount), index(row, ColCount), {Qt::DisplayRole});
-        const QModelIndex countIdx = index(row, ColCount);
-        const QModelIndex textIdx = index(row, ColText);
-        emit dataChanged(countIdx, textIdx, {Qt::DisplayRole});
-    }
-    else
-    {
+        emit dataChanged(index(row, ColCount), index(row, ColTimestamp), {Qt::DisplayRole, Qt::UserRole, Qt::ToolTipRole});
+    } else {
         const int row = it.value();
         if (row < 0 || row >= static_cast<int>(m_rows.size()))
             return;
 
         RowBucket &bucket = m_rows[static_cast<std::size_t>(row)];
         ++bucket.totalCount;
-        // RNET_COUNT_R6_ALWAYS_REFRESH: Count is cheap and must never look stale/empty.
-        emit dataChanged(index(row, ColCount), index(row, ColCount), {Qt::DisplayRole});
-        // RNET_COUNT_R5_ALWAYS_REFRESH: Count is cheap and must never look stale/empty.
-        emit dataChanged(index(row, ColCount), index(row, ColCount), {Qt::DisplayRole});
         bucket.history.push_back(std::move(decoded));
-        if (bucket.history.size() > kMaxHistoryPerRow)
-            bucket.history.erase(bucket.history.begin(), bucket.history.begin() + (bucket.history.size() - kMaxHistoryPerRow));
+
+        if (bucket.history.size() > kMaxHistoryPerRow) {
+            bucket.history.erase(bucket.history.begin(),
+                                 bucket.history.begin() + (bucket.history.size() - kMaxHistoryPerRow));
+        }
 
         if (!bucket.throttleStarted) {
             bucket.updateThrottle.start();
             bucket.throttleStarted = true;
         }
 
+        emit dataChanged(index(row, ColCount), index(row, ColCount), {Qt::DisplayRole, Qt::UserRole});
         if (bucket.updateThrottle.elapsed() >= kUiUpdateIntervalMs) {
-            emit dataChanged(index(row, ColData),
-                             index(row, ColText),
-                             {Qt::DisplayRole});
+            emit dataChanged(index(row, ColName), index(row, ColTimestamp), {Qt::DisplayRole, Qt::UserRole, Qt::ToolTipRole});
             bucket.updateThrottle.restart();
         }
     }
@@ -235,11 +391,9 @@ const RNetFrame *RNetFrameModel::latestFrameAt(int row) const
 {
     if (row < 0 || row >= static_cast<int>(m_rows.size()))
         return nullptr;
-
     const RowBucket &bucket = m_rows[static_cast<std::size_t>(row)];
     if (bucket.history.empty())
         return nullptr;
-
     return bucket.history.back().get();
 }
 
@@ -247,7 +401,6 @@ const std::vector<std::unique_ptr<RNetFrame>> *RNetFrameModel::historyAt(int row
 {
     if (row < 0 || row >= static_cast<int>(m_rows.size()))
         return nullptr;
-
     return &m_rows[static_cast<std::size_t>(row)].history;
 }
 
@@ -273,15 +426,27 @@ QString RNetFrameModel::formatPayload(const QByteArray &data)
         return QStringLiteral("-");
 
     QString out;
-    for (int i = 0; i < data.size(); ++i)
-    {
+    for (int i = 0; i < data.size(); ++i) {
         if (i)
             out += QLatin1Char(' ');
-
         out += QStringLiteral("%1")
-                   .arg(static_cast<quint8>(data.at(i)), 2, 16, QLatin1Char('0'))
-                   .toUpper();
+            .arg(static_cast<quint8>(data.at(i)), 2, 16, QLatin1Char('0'))
+            .toUpper();
     }
-
     return out;
+}
+
+QString RNetFrameModel::idPartsString(const RNetFrame &frame)
+{
+    return joinPairs(decodedPairsFromText(frame), true);
+}
+
+QString RNetFrameModel::fieldsString(const RNetFrame &frame)
+{
+    return joinPairs(decodedPairsFromText(frame), false);
+}
+
+QString RNetFrameModel::sortString(QString value)
+{
+    return value.toCaseFolded();
 }
