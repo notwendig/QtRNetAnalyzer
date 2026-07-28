@@ -25,24 +25,15 @@ public:
     enum Column
     {
         ColPlot = 0,
-        ColCheck = ColPlot,
-
-        ColRow = 1,
-        ColNumber = ColRow,
-        ColIndex = ColRow,
-        ColNo = ColRow,
-
+        ColIndex = 1,
         ColCount = 2,
         ColId = 3,
-        ColID = ColId,
         ColName = 4,
         ColIdParts = 5,
-        ColIDParts = ColIdParts,
         ColFields = 6,
         ColData = 7,
         ColExt = 8,
-        ColRTR = 9,
-        ColRtr = ColRTR,
+        ColRtr = 9,
         ColTimestamp = 10,
         ColumnCount = 11
     };

@@ -255,8 +255,8 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
                 rnetHeader->resizeSection(col, width);
         };
 
-        qtraSetRNetColumn(0, QHeaderView::Fixed, 46);
-        qtraSetRNetColumn(1, QHeaderView::Fixed, 48);
+        qtraSetRNetColumn(RNetFrameModel::ColPlot, QHeaderView::Fixed, 46);
+        qtraSetRNetColumn(RNetFrameModel::ColIndex, QHeaderView::Fixed, 48);
         qtraSetRNetColumn(RNetFrameModel::ColCount, QHeaderView::Interactive, 76);
         qtraSetRNetColumn(RNetFrameModel::ColId, QHeaderView::Interactive, 110);
         qtraSetRNetColumn(RNetFrameModel::ColName, QHeaderView::Stretch, 0);
@@ -291,8 +291,8 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
 
     // Visible order is controlled by RNetFrameModel's enum:
     // Plot | # | Count | ID | Name | ID parts | Fields | Data | Ext | RTR | Timestamp | Text(hidden)
-    qtraSetRNetColumn(0, QHeaderView::Fixed, 44);
-    qtraSetRNetColumn(1, QHeaderView::Fixed, 48);
+    qtraSetRNetColumn(RNetFrameModel::ColPlot, QHeaderView::Fixed, 44);
+    qtraSetRNetColumn(RNetFrameModel::ColIndex, QHeaderView::Fixed, 48);
     qtraSetRNetColumn(RNetFrameModel::ColCount, QHeaderView::Fixed, 72);
     qtraSetRNetColumn(RNetFrameModel::ColId, QHeaderView::Fixed, 104);
     qtraSetRNetColumn(RNetFrameModel::ColName, QHeaderView::Stretch);
@@ -349,12 +349,12 @@ MainWindow::MainWindow(const QString &inputFile, QWidget *parent)
             rnetHeader->resizeSection(column, width);
     };
 
-    qtraSetRNetColumn(0, QHeaderView::Fixed, 48);
-    qtraSetRNetColumn(1, QHeaderView::Fixed, 54);
+    qtraSetRNetColumn(RNetFrameModel::ColPlot, QHeaderView::Fixed, 48);
+    qtraSetRNetColumn(RNetFrameModel::ColIndex, QHeaderView::Fixed, 54);
     qtraSetRNetColumn(RNetFrameModel::ColCount, QHeaderView::Fixed, 74);
     qtraSetRNetColumn(RNetFrameModel::ColId, QHeaderView::Fixed, 112);
     qtraSetRNetColumn(RNetFrameModel::ColExt, QHeaderView::Fixed, 46);
-    qtraSetRNetColumn(7, QHeaderView::Fixed, 50);
+    qtraSetRNetColumn(RNetFrameModel::ColData, QHeaderView::Fixed, 50);
     qtraSetRNetColumn(RNetFrameModel::ColTimestamp, QHeaderView::Interactive, 135);
 
     qtraSetRNetColumn(RNetFrameModel::ColName, QHeaderView::Stretch);

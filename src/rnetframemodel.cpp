@@ -91,7 +91,7 @@ QVariant RNetFrameModel::headerData(int section, Qt::Orientation orientation, in
     switch (section) {
     case ColPlot:
         return QStringLiteral("");
-    case ColRow:
+    case ColIndex:
         return QStringLiteral("#");
     case ColCount:
         return QStringLiteral("Count");
@@ -107,7 +107,7 @@ QVariant RNetFrameModel::headerData(int section, Qt::Orientation orientation, in
         return QStringLiteral("Data");
     case ColExt:
         return QStringLiteral("Ext");
-    case ColRTR:
+    case ColRtr:
         return QStringLiteral("RTR");
     case ColTimestamp:
         return QStringLiteral("Timestamp");
@@ -116,108 +116,22 @@ QVariant RNetFrameModel::headerData(int section, Qt::Orientation orientation, in
     }
 }
 
-
 QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
 {
-    // QTRA_CANONICAL_EXT_RTR_TIMESTAMP_DATA
-    // Hard override for the final three real columns after Text was removed
-    // from the model.  These columns must not depend on the former ColText
-    // mapping or on view visibility state.
-    if (index.isValid()
-        && index.row() >= 0
-        && index.row() < rowCount()
-        && (role == Qt::ToolTipRole
-            || index.column() == ColExt
-            || index.column() == ColRTR
-            || index.column() == ColTimestamp)) {
-        const RNetFrame *qtraFrame = latestFrameAt(index.row());
-        if (!qtraFrame)
-            return {};
-
-        if (role == Qt::ToolTipRole)
-            return qtraFrame->toString();
-
-        if (role == Qt::TextAlignmentRole)
-            return Qt::AlignCenter;
-
-        if (role == Qt::UserRole) {
-            switch (index.column()) {
-            case ColExt:
-                return qtraFrame->extended ? 1 : 0;
-            case ColRTR:
-                return qtraFrame->remote ? 1 : 0;
-            case ColTimestamp:
-                return QVariant::fromValue<double>(static_cast<double>(qtraFrame->hwTimestamp));
-            default:
-                break;
-            }
-        }
-
-        if (role == Qt::DisplayRole || role == Qt::EditRole) {
-            switch (index.column()) {
-            case ColExt:
-                return qtraFrame->extended ? QStringLiteral("EXT") : QStringLiteral("STD");
-            case ColRTR:
-                return qtraFrame->remote ? QStringLiteral("RTR") : QString();
-            case ColTimestamp:
-                return QString::number(static_cast<qulonglong>(qtraFrame->hwTimestamp));
-            default:
-                break;
-            }
-        }
-    }
-
     if (!index.isValid())
         return {};
+
     if (index.row() < 0 || index.row() >= static_cast<int>(m_rows.size()))
         return {};
 
     const RowBucket &bucket = m_rows[static_cast<std::size_t>(index.row())];
+
     if (bucket.history.empty())
         return {};
 
     const RNetFrame *frame = bucket.history.back().get();
     if (!frame)
         return {};
-
-    // QTRA_RNET_EXT_RTR_TIMESTAMP_FIX:
-    // Text ist keine sichtbare Spalte mehr. Der Volltext wird ausschließlich
-    // als Tooltip geliefert. Ext/RTR/Timestamp werden hier hart an ihre
-    // kanonischen Spalten gebunden, damit ein versteckter Tooltip/Text keine
-    // nachfolgenden Spalten mehr verschieben oder leeren kann.
-    if (role == Qt::ToolTipRole)
-        return frame->toString();
-
-    if (role == Qt::DisplayRole || role == Qt::EditRole) {
-        const auto &qtraCan = *frame;
-        switch (index.column()) {
-        case ColExt:
-            return qtraCan.extended ? QStringLiteral("EXT") : QStringLiteral("STD");
-        case ColRTR:
-            return qtraCan.remote ? QStringLiteral("RTR") : QString();
-        case ColTimestamp:
-            if (qtraCan.hwTimestamp != 0)
-                return QString::number(double(qtraCan.hwTimestamp) / 1000.0, 'f', 3);
-            return QString();
-        default:
-            break;
-        }
-    }
-
-    if (role == Qt::UserRole) {
-        const auto &qtraCan = *frame;
-        switch (index.column()) {
-        case ColExt:
-            return qtraCan.extended ? 1 : 0;
-        case ColRTR:
-            return qtraCan.remote ? 1 : 0;
-        case ColTimestamp:
-            return QVariant::fromValue<qulonglong>(qtraCan.hwTimestamp);
-        default:
-            break;
-        }
-    }
-
 
     if (role == Qt::CheckStateRole && index.column() == ColPlot)
         return m_taggedKeys.contains(bucket.key) ? Qt::Checked : Qt::Unchecked;
@@ -226,9 +140,6 @@ QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
         return frame->toString();
 
     if (role == Qt::TextAlignmentRole) {
-        if (role == Qt::ToolTipRole)
-            return frame->toString();
-
         switch (index.column()) {
         case ColPlot:
         case ColIndex:
@@ -244,30 +155,41 @@ QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
 
     if (role == Qt::UserRole) {
         switch (index.column()) {
-        case ColPlot: return m_taggedKeys.contains(bucket.key) ? 1 : 0;
-        case ColIndex: return index.row() + 1;
-        case ColCount: return QVariant::fromValue<qulonglong>(bucket.totalCount);
-        case ColId: return QVariant::fromValue<qulonglong>(frame->id);
-        case ColName: return sortString(frame->name());
-        case ColIdParts: return sortString(idPartsString(*frame));
-        case ColFields: return sortString(fieldsString(*frame));
-        case ColData: return sortString(formatPayload(frame->data));
-        case ColExt: return frame->extended ? 1 : 0;
-        case ColRtr: return frame->remote ? 1 : 0;
-        case ColTimestamp: return QVariant::fromValue<double>(static_cast<double>(frame->hwTimestamp));
-
-        default: return {};
+        case ColPlot:
+            return m_taggedKeys.contains(bucket.key) ? 1 : 0;
+        case ColIndex:
+            return index.row() + 1;
+        case ColCount:
+            return QVariant::fromValue<qulonglong>(static_cast<qulonglong>(bucket.totalCount));
+        case ColId:
+            return QVariant::fromValue<qulonglong>(static_cast<qulonglong>(frame->id));
+        case ColName:
+            return sortString(frame->name());
+        case ColIdParts:
+            return sortString(idPartsString(*frame));
+        case ColFields:
+            return sortString(fieldsString(*frame));
+        case ColData:
+            return sortString(formatPayload(frame->data));
+        case ColExt:
+            return frame->extended ? 1 : 0;
+        case ColRtr:
+            return frame->remote ? 1 : 0;
+        case ColTimestamp:
+            return QVariant::fromValue<double>(static_cast<double>(frame->hwTimestamp));
+        default:
+            return {};
         }
     }
 
-    if (role != Qt::DisplayRole && role != Qt::ToolTipRole)
+    if (role != Qt::DisplayRole && role != Qt::EditRole)
         return {};
 
     switch (index.column()) {
     case ColPlot:
         return {};
     case ColIndex:
-        return index.row() + 1;
+        return QString::number(index.row() + 1);
     case ColCount:
         return QString::number(static_cast<qulonglong>(bucket.totalCount));
     case ColId:
@@ -283,16 +205,15 @@ QVariant RNetFrameModel::data(const QModelIndex &index, int role) const
     case ColData:
         return formatPayload(frame->data);
     case ColExt:
-        return frame->extended ? QStringLiteral("1") : QStringLiteral("0");
+        return frame->extended ? QStringLiteral("EXT") : QStringLiteral("STD");
     case ColRtr:
-        return frame->remote ? QStringLiteral("1") : QStringLiteral("0");
+        return frame->remote ? QStringLiteral("RTR") : QString();
     case ColTimestamp:
         return QString::number(static_cast<double>(frame->hwTimestamp), 'f', 6);
     default:
         return {};
     }
 }
-
 Qt::ItemFlags RNetFrameModel::flags(const QModelIndex &index) const
 {
     Qt::ItemFlags f = QAbstractTableModel::flags(index);
